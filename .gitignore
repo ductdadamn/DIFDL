@@ -1,0 +1,46 @@
+# === Thu muc tham chieu & du lieu lon (KHONG push len GitHub) ===
+ADCD-Net/
+findit2/
+doctamper_root/
+archive/
+weights/
+checkpoints/
+
+# === Du lieu sinh moi, mask & ket qua thuc nghiem ===
+data_synth/
+ocr_mask/
+findit2_test_qf*/
+exp_out/
+outputs/
+*.lmdb
+*-lock.mdb
+
+# === Model checkpoints, pickles & tensor dumps ===
+*.pth
+*.pt
+*.pkl
+*.pk
+*.ckpt
+*.safetensors
+*.npy
+*.npz
+*.zip
+*.tar.gz
+
+# === Logs & tracking ===
+runs/
+tb_log/
+wandb/
+*.log
+
+# === Python & IDE ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+.env
