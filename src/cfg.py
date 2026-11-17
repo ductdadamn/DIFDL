@@ -25,10 +25,11 @@ val_aug = None
 
 # ------------------ MODEL CFG -------------------
 
-root = 'path/to/DocTamper'
-ckpt = 'path/to/ADCDNet.pth'
-docres_ckpt_path = 'path/to/docres.pkl'
-pkl_dir = 'path/to/path_pkl'  # specify the directory where pkl files are stored
+_BASE_DIR = op.dirname(op.dirname(op.abspath(__file__)))
+root = op.join(_BASE_DIR, 'doctamper_root')
+ckpt = op.join(_BASE_DIR, 'weights', 'ADCDNet.pth')
+docres_ckpt_path = op.join(_BASE_DIR, 'weights', 'docres.pkl')
+pkl_dir = op.join(_BASE_DIR, 'data_synth', 'path_pkl')  # specify the directory where pkl files are stored
 
 # ['TestingSet', 'FCD', 'SCD', 'T-SROIE_test', 'Tampered-IC13_test', 'RealTextManipulation_test', 'OSTF_test']
 all_ds_name = ['TestingSet', 'FCD', 'SCD', 'T-SROIE_test', 'Tampered-IC13_test', 'RealTextManipulation_test', 'OSTF_test']
