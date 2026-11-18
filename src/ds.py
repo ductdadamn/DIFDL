@@ -63,6 +63,37 @@ def bbox_2_mask(bbox, ori_h, ori_w, expand_ratio=0.1):
     return ocr_mask
 
 
+def load_or_fallback_bboxes(img_np, ocr_dir, img_name):
+    """Load char bboxes from .pkl/.png if present; otherwise extract text boxes via morphology."""
+    char_seg_path = op.join(ocr_dir, img_name + '.pkl')
+    if op.exists(char_seg_path):
+        with open(char_seg_path, 'rb') as f:
+            return pickle.load(f)
+
+    h, w = img_np.shape[:2]
+    png_path = op.join(ocr_dir, img_name + '.png')
+    if op.exists(png_path):
+        m = (cv2.imread(png_path, 0) != 0).astype(np.uint8)
+        num_labels, _, stats, _ = cv2.connectedComponentsWithStats(m)
+    else:
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY) if img_np.ndim == 3 else img_np
+        thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 12
+        )
+        dilated = cv2.dilate(thresh, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3)), iterations=1)
+        num_labels, _, stats, _ = cv2.connectedComponentsWithStats(dilated)
+
+    bboxes = []
+    for i in range(1, num_labels):
+        x, y, bw, bh, area = stats[i]
+        if 4 <= bw <= int(0.9 * w) and 4 <= bh <= int(0.5 * h) and area >= 16:
+            x1, y1 = max(0, int(x)), max(0, int(y))
+            x2, y2 = min(w, int(x + bw)), min(h, int(y + bh))
+            if x2 > x1 + 1 and y2 > y1 + 1:
+                bboxes.append([x1, y1, x2, y2])
+    return bboxes
+
+
 def multi_jpeg(img, num_jpeg, min_qf, upper_bound, jpeg_record=None):
     with tempfile.NamedTemporaryFile(delete=True, suffix='.jpg') as tmp:
         img = img.convert("L")
@@ -232,15 +263,8 @@ class TrainDs(Dataset):
             img_name = '%06d' % index
             img, mask = load_data(index, lmdb)
 
-        # load char seg
-        char_seg_path = op.join(self.ocr_dir, img_name + '.pkl')
-        if op.exists(char_seg_path):
-            with open(char_seg_path, 'rb') as f:
-                c_bbox = pickle.load(f)
-        else:
-            c_bbox = []
-
-        img = np.array(img)
+        img = np.array(img.convert('RGB'))
+        c_bbox = load_or_fallback_bboxes(img, self.ocr_dir, img_name)
 
         if random() > 0.5:  # DCT grid align sample
             aug_func = self.align_aug
@@ -305,12 +329,8 @@ class DtdValDs(Dataset):
             img, mask = load_data(index, lmdb)
             h, w = mask.shape
 
-        char_seg_path = op.join(self.ocr_dir, img_name + '.pkl')
-        if op.exists(char_seg_path):
-            with open(char_seg_path, 'rb') as f:
-                c_bbox = pickle.load(f)
-        else:
-            c_bbox = []
+        img = img.convert('RGB')
+        c_bbox = load_or_fallback_bboxes(np.array(img), self.ocr_dir, img_name)
 
         # augment
         if cfg.val_aug is not None:
@@ -394,7 +414,7 @@ class GeneralValDs(Dataset):
 
 
         img_name = op.basename(img_path).split('.')[0]
-        img = cv2.imread(img_path)
+        img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
         h, w = img.shape[:2]
         mask = (cv2.imread(mask_path, 0) != 0).astype(np.uint8)
         ocr_mask = (cv2.imread(ocr_path, 0) != 0).astype(np.uint8)
