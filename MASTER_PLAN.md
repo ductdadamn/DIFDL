@@ -75,7 +75,7 @@ Hạ tầng hiện có: **3 máy RTX 4060 8GB** (Viết, Quag, desktop Zam), **1
      - **`~300` mảnh `512×512` `LaMa-FindIt2-Test`** sinh bằng `LaMa` trên 183 hóa đơn sạch `findit2/test`.
    - **Test Set 2 — Unseen AI trên Hóa đơn (`~300` ảnh `AnyText-FindIt2` — Điểm nhấn Phương án 3A):**
      - Chạy **Latent Diffusion `AnyText`** trên Server `4×RTX 3090` (~5 phút cho 300 ảnh) để viết đè số tiền/ngày tháng mới trên mảnh `512×512` của 183 hóa đơn sạch `findit2/test`.
-     - **Bắt buộc ghép theo mặt nạ làm mượt biên 3px:** $I_{\text{out}} = M \odot I_{\text{AnyText}} + (1 - M) \odot I_{\text{orig\_512}}$ để các dòng chữ không sửa xung quanh giữ nguyên độ nét gốc.
+     - **Bắt buộc ghép theo mặt nạ làm mượt biên 3px:** $I_{\text{out}} = M \odot I_{\text{AnyText}} + (1 - M) \odot I_{\text{orig}}$ để các dòng chữ không sửa xung quanh giữ nguyên độ nét gốc.
      - Toàn bộ `AnyText-FindIt2` **hoàn toàn không xuất hiện lúc Train**, giúp kiểm chứng khả năng tổng quát hóa từ *GAN + CNN Inpainting* sang *Diffusion Text Editing* trên chính hóa đơn!
    - **Test Set 3 — Pristine Control & JPEG Stress Test:**
      - **183 ảnh sạch nguyên bản (`findit2/test`)** để đo **Image-level FPR ($\downarrow$)**.
