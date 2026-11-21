@@ -1,0 +1,37 @@
+# DIFDL Synchronized Environment (Python 3.10 + CUDA 12.1 default)
+# Synced across: Local GPUs (RTX 3050 / RTX 4060) & Linux GPU Lab Servers
+# Prerequisites (Ubuntu/Debian): sudo apt-get install -y build-essential libjpeg-dev
+# Recommended install:
+#   bash scripts/setup_env.sh               (CUDA 12.1)
+#   bash scripts/setup_env.sh --cuda cu118  (CUDA 11.8 for older server drivers)
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# Core Deep Learning (PyTorch 2.3.0 + CUDA 12.1)
+torch==2.3.0+cu121
+torchvision==0.18.0+cu121
+numpy>=1.26.4,<2.0.0
+
+# ADCD-Net Core Dependencies
+albumentations==2.0.8
+jpeg2dct==0.2.4
+efficientnet-pytorch==0.7.1
+einops==0.8.2
+opencv-python-headless>=4.9.0,<4.12.0
+scipy>=1.11.0,<1.15.0
+Pillow>=9.5.0,<12.0.0
+lmdb>=1.4.1
+six>=1.16.0
+tqdm>=4.66.0
+tensorboard>=2.16.0
+
+# Evaluation & Visualization
+scikit-learn>=1.4.0
+matplotlib>=3.8.0
+
+# OCR Text Mask Extraction (src/seg_char.py -> PP-OCRv5_server_det)
+# Note: paddlepaddle-gpu (or paddlepaddle) is installed by scripts/setup_env.sh
+paddleocr>=3.0.0
+
+# Seen AI Inpainting (LaMa-FindIt2)
+simple-lama-inpainting==0.1.2
