@@ -83,18 +83,10 @@ else
     rm -f /tmp/difdl_reqs_notorch.txt
 fi
 
-# 6. Install PaddlePaddle runtime for src/seg_char.py (PP-OCRv5_server_det)
-if [ "${PADDLE_MODE}" = "gpu" ]; then
-    echo "[INFO] Installing paddlepaddle-gpu (CUDA 12.x compatible)..."
-    uv pip install --python "${VENV_DIR}/bin/python" "paddlepaddle-gpu>=3.0.0" \
-        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ || {
-        echo "[WARN] paddlepaddle-gpu wheel unavailable; falling back to CPU paddlepaddle..."
-        uv pip install --python "${VENV_DIR}/bin/python" "paddlepaddle>=3.0.0"
-    }
-else
-    echo "[INFO] Installing paddlepaddle (CPU)..."
-    uv pip install --python "${VENV_DIR}/bin/python" "paddlepaddle>=3.0.0"
-fi
+# 6. Install CPU PaddlePaddle in main env (paddlepaddle-gpu cu126 upgrades cuDNN 8 -> 9,
+#    which conflicts with torch==2.3.0+cu121's nvidia-cudnn-cu12==8.9.2.26)
+echo "[INFO] Installing paddlepaddle==3.0.0 (keeps PyTorch 2.3.0+cu121 cuDNN8 intact)..."
+uv pip install --python "${VENV_DIR}/bin/python" "paddlepaddle==3.0.0"
 
 # 7. Ensure numpy<2.0.0 and opencv-python-headless remain clean after all installs
 uv pip install --python "${VENV_DIR}/bin/python" "numpy>=1.26.4,<2.0.0"

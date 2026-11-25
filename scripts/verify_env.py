@@ -41,9 +41,10 @@ def main():
     check_version("sklearn")
     check_version("matplotlib")
 
-    # 2. CUDA / GPU check
+    # 2. CUDA / cuDNN / GPU check
     cuda_ok = torch.cuda.is_available()
-    print(f"  [OK] CUDA available           {cuda_ok} (torch CUDA: {torch.version.cuda})")
+    cudnn_ver = torch.backends.cudnn.version() if cuda_ok else None
+    print(f"  [OK] CUDA available           {cuda_ok} (torch CUDA: {torch.version.cuda}, cuDNN: {cudnn_ver})")
     if cuda_ok:
         for idx in range(torch.cuda.device_count()):
             props = torch.cuda.get_device_properties(idx)
