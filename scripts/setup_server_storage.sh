@@ -39,13 +39,14 @@ if [ -z "${TEAM_ROOT:-}" ]; then
 fi
 CUDA_TAG="cu121"
 WITH_ANYTEXT=0
-PADDLE_MODE="gpu"
+PADDLE_MODE="cpu"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --team-root) TEAM_ROOT="$2"; shift 2 ;;
         --cuda) CUDA_TAG="$2"; shift 2 ;;
         --with-anytext) WITH_ANYTEXT=1; shift ;;
+        --gpu-ocr-env) PADDLE_MODE="gpu_isolated"; shift ;;
         --cpu-paddle) PADDLE_MODE="cpu"; shift ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -157,16 +158,22 @@ else
     python -m pip install --no-build-isolation -r "${TMPDIR}/difdl_reqs_notorch.txt"
 fi
 
-# 5. Install PaddlePaddle runtime for src/seg_char.py
-if [ "${PADDLE_MODE}" = "gpu" ]; then
-    echo "[INFO] Installing paddlepaddle-gpu..."
+# 5. Install CPU PaddlePaddle in main env (avoids paddlepaddle-gpu cu126/cuDNN9
+#    overwriting torch==2.3.0+cu121's required cuDNN8 & nvidia-*-cu12==12.1 wheels!)
+echo "[INFO] Installing CPU paddlepaddle in main env (keeps PyTorch cu121/cuDNN8 intact)..."
+python -m pip install "paddlepaddle==3.0.0"
+
+if [ "${PADDLE_MODE}" = "gpu_isolated" ]; then
+    OCR_GPU_PREFIX="${TEAM_ROOT}/envs/ocr_gpu"
+    echo "[INFO] Creating isolated GPU PaddleOCR env at ${OCR_GPU_PREFIX}..."
+    if [ ! -d "${OCR_GPU_PREFIX}/bin" ]; then
+        conda create --prefix "${OCR_GPU_PREFIX}" -y -c conda-forge python=3.10 pip "setuptools<75" wheel
+    fi
+    conda activate "${OCR_GPU_PREFIX}"
     python -m pip install "paddlepaddle-gpu>=3.0.0" \
-        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ || {
-        echo "[WARN] paddlepaddle-gpu wheel unavailable; installing CPU paddlepaddle..."
-        python -m pip install "paddlepaddle>=3.0.0"
-    }
-else
-    python -m pip install "paddlepaddle>=3.0.0"
+        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+    python -m pip install "paddleocr>=3.0.0" "opencv-python-headless==4.10.0.84" "numpy>=1.26.4,<2.0.0" "chardet<6.0.0"
+    conda activate "${ENV_PREFIX}"
 fi
 
 # Enforce headless OpenCV (prevents libGL.so.1 crash on headless servers like ict14)
@@ -202,17 +209,22 @@ chmod +x "${ACTIVATE_FILE}"
 if [ "${WITH_ANYTEXT}" -eq 1 ]; then
     echo "[INFO] Setting up isolated AnyText Conda env at ${ANYTEXT_PREFIX}..."
     if [ ! -d "${ANYTEXT_PREFIX}/bin" ]; then
-        conda create --prefix "${ANYTEXT_PREFIX}" -y -c conda-forge python=3.10 pip "setuptools<75" wheel
+        conda create --prefix "${ANYTEXT_PREFIX}" -y -c conda-forge python=3.10 pip "setuptools<70" wheel
     fi
     conda activate "${ANYTEXT_PREFIX}"
-    python -m pip install \
+    python -m pip install --upgrade "pip<26" "setuptools<70" wheel "Cython<3.0"
+    python -m pip install --no-build-isolation \
+        --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}" \
+        "setuptools<70" \
         "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}" \
-        --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
-    python -m pip install \
-        "numpy>=1.23.5,<1.26.0" "albumentations==0.4.3" "opencv-python-headless==4.8.1.78" \
-        "pytorch-lightning==1.5.0" "omegaconf==2.1.1" "einops==0.3.0" "transformers==4.19.2" \
-        "timm==0.6.12" "open-clip-torch==2.0.2" "easydict==1.10" "addict==2.4.0" \
-        "modelscope==1.10.0" "Pillow>=9.5.0,<11.0.0" "scipy" "tqdm" "freetype-py"
+        "numpy==1.23.5" "scipy==1.10.1" "Pillow==9.5.0" \
+        "albumentations==1.3.1" "opencv-python-headless==4.8.1.78" \
+        "pytorch-lightning==1.5.0" "torchmetrics==0.6.0" "pyDeprecate==0.3.1" \
+        "omegaconf==2.1.1" "einops==0.3.0" "kornia==0.6.0" \
+        "huggingface-hub==0.23.5" "transformers==4.30.2" "diffusers==0.10.2" "safetensors" \
+        "timm==0.6.12" "open-clip-torch==2.0.2" \
+        "easydict==1.10" "addict==2.4.0" "datasets==2.18.0" "modelscope==1.10.0" \
+        "simplejson" "sortedcontainers" "tqdm" "freetype-py"
 
     mkdir -p "${TEAM_ROOT}/third_party"
     if [ ! -d "${TEAM_ROOT}/third_party/AnyText" ]; then
