@@ -73,7 +73,8 @@ mkdir -p \
     "${CACHE_ROOT}/torch" \
     "${CACHE_ROOT}/huggingface" \
     "${CACHE_ROOT}/modelscope" \
-    "${CACHE_ROOT}/paddlex"
+    "${CACHE_ROOT}/paddlex" \
+    "${CACHE_ROOT}/matplotlib"
 
 # Redirect EVERY cache & temp folder to /storage (zero $HOME usage!)
 export CONDA_PKGS_DIRS="${CACHE_ROOT}/conda_pkgs"
@@ -83,6 +84,8 @@ export TORCH_HOME="${CACHE_ROOT}/torch"
 export HF_HOME="${CACHE_ROOT}/huggingface"
 export MODELSCOPE_CACHE="${CACHE_ROOT}/modelscope"
 export PADDLE_PDX_CACHE_HOME="${CACHE_ROOT}/paddlex"
+export MPLCONFIGDIR="${CACHE_ROOT}/matplotlib"
+export NO_ALBUMENTATIONS_UPDATE=1
 
 echo "======================================================================"
 echo " DIFDL Lab Server Setup (/storage Shared-Account Safe Mode)"
@@ -166,7 +169,9 @@ else
     python -m pip install "paddlepaddle>=3.0.0"
 fi
 
+# Enforce headless OpenCV (prevents libGL.so.1 crash on headless servers like ict14)
 python -m pip install "numpy>=1.26.4,<2.0.0"
+python -m pip install --force-reinstall --no-deps "opencv-python-headless==4.10.0.84"
 
 # 6. Write convenient activation script in /storage (does NOT touch ~/.bashrc!)
 ACTIVATE_FILE="${TEAM_ROOT}/activate_difdl.sh"
@@ -181,6 +186,8 @@ export TORCH_HOME="${CACHE_ROOT}/torch"
 export HF_HOME="${CACHE_ROOT}/huggingface"
 export MODELSCOPE_CACHE="${CACHE_ROOT}/modelscope"
 export PADDLE_PDX_CACHE_HOME="${CACHE_ROOT}/paddlex"
+export MPLCONFIGDIR="${CACHE_ROOT}/matplotlib"
+export NO_ALBUMENTATIONS_UPDATE=1
 
 if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
     source "${CONDA_BASE}/etc/profile.d/conda.sh"
