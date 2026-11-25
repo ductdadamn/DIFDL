@@ -45,28 +45,23 @@ fi
 
 echo "[INFO] Creating isolated Python 3.10 venv at ${VENV_DIR}..."
 uv python install 3.10
-uv venv "${VENV_DIR}" --python 3.10 --seed
+uv venv --clear "${VENV_DIR}" --python 3.10 --seed
 
 echo "[INFO] Installing AnyText PyTorch (${CUDA_TAG}) & dependencies..."
-uv pip install --python "${VENV_DIR}/bin/python" \
-    "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}" \
-    --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
+uv pip install --python "${VENV_DIR}/bin/python" "setuptools<70" wheel "Cython<3.0"
 
-uv pip install --python "${VENV_DIR}/bin/python" \
-    "numpy>=1.23.5,<1.26.0" \
-    "albumentations==0.4.3" \
-    "opencv-python-headless==4.8.1.78" \
-    "pytorch-lightning==1.5.0" \
-    "omegaconf==2.1.1" \
-    "einops==0.3.0" \
-    "transformers==4.19.2" \
-    "timm==0.6.12" \
-    "open-clip-torch==2.0.2" \
-    "easydict==1.10" \
-    "addict==2.4.0" \
-    "modelscope==1.10.0" \
-    "Pillow>=9.5.0,<11.0.0" \
-    "scipy" "tqdm" "freetype-py"
+uv pip install --python "${VENV_DIR}/bin/python" --no-build-isolation \
+    --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}" \
+    "setuptools<70" \
+    "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}" \
+    "numpy==1.23.5" "scipy==1.10.1" "Pillow==9.5.0" \
+    "albumentations==1.3.1" "opencv-python-headless==4.8.1.78" \
+    "pytorch-lightning==1.5.0" "torchmetrics==0.6.0" "pyDeprecate==0.3.1" \
+    "omegaconf==2.1.1" "einops==0.3.0" "kornia==0.6.0" \
+    "huggingface-hub==0.23.5" "transformers==4.30.2" "diffusers==0.10.2" "safetensors" \
+    "timm==0.6.12" "open-clip-torch==2.0.2" \
+    "easydict==1.10" "addict==2.4.0" "datasets==2.18.0" "modelscope==1.10.0" \
+    "simplejson" "sortedcontainers" "tqdm" "freetype-py"
 
 echo "[INFO] Verifying AnyText venv..."
 "${VENV_DIR}/bin/python" -c "

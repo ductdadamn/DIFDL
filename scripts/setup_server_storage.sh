@@ -209,17 +209,22 @@ chmod +x "${ACTIVATE_FILE}"
 if [ "${WITH_ANYTEXT}" -eq 1 ]; then
     echo "[INFO] Setting up isolated AnyText Conda env at ${ANYTEXT_PREFIX}..."
     if [ ! -d "${ANYTEXT_PREFIX}/bin" ]; then
-        conda create --prefix "${ANYTEXT_PREFIX}" -y -c conda-forge python=3.10 pip "setuptools<75" wheel
+        conda create --prefix "${ANYTEXT_PREFIX}" -y -c conda-forge python=3.10 pip "setuptools<70" wheel
     fi
     conda activate "${ANYTEXT_PREFIX}"
-    python -m pip install \
+    python -m pip install --upgrade "pip<26" "setuptools<70" wheel "Cython<3.0"
+    python -m pip install --no-build-isolation \
+        --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}" \
+        "setuptools<70" \
         "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}" \
-        --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
-    python -m pip install \
-        "numpy>=1.23.5,<1.26.0" "albumentations==0.4.3" "opencv-python-headless==4.8.1.78" \
-        "pytorch-lightning==1.5.0" "omegaconf==2.1.1" "einops==0.3.0" "transformers==4.19.2" \
-        "timm==0.6.12" "open-clip-torch==2.0.2" "easydict==1.10" "addict==2.4.0" \
-        "modelscope==1.10.0" "Pillow>=9.5.0,<11.0.0" "scipy" "tqdm" "freetype-py"
+        "numpy==1.23.5" "scipy==1.10.1" "Pillow==9.5.0" \
+        "albumentations==1.3.1" "opencv-python-headless==4.8.1.78" \
+        "pytorch-lightning==1.5.0" "torchmetrics==0.6.0" "pyDeprecate==0.3.1" \
+        "omegaconf==2.1.1" "einops==0.3.0" "kornia==0.6.0" \
+        "huggingface-hub==0.23.5" "transformers==4.30.2" "diffusers==0.10.2" "safetensors" \
+        "timm==0.6.12" "open-clip-torch==2.0.2" \
+        "easydict==1.10" "addict==2.4.0" "datasets==2.18.0" "modelscope==1.10.0" \
+        "simplejson" "sortedcontainers" "tqdm" "freetype-py"
 
     mkdir -p "${TEAM_ROOT}/third_party"
     if [ ! -d "${TEAM_ROOT}/third_party/AnyText" ]; then
