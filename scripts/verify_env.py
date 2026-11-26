@@ -41,7 +41,7 @@ def main():
     check_version("sklearn")
     check_version("matplotlib")
 
-    # 2. CUDA / cuDNN / GPU check
+    # 2. CUDA / cuDNN / GPU & Kernel execution check
     cuda_ok = torch.cuda.is_available()
     cudnn_ver = torch.backends.cudnn.version() if cuda_ok else None
     print(f"  [OK] CUDA available           {cuda_ok} (torch CUDA: {torch.version.cuda}, cuDNN: {cudnn_ver})")
@@ -49,7 +49,13 @@ def main():
         for idx in range(torch.cuda.device_count()):
             props = torch.cuda.get_device_properties(idx)
             vram_gb = props.total_memory / (1024 ** 3)
-            print(f"       GPU {idx}: {props.name} ({vram_gb:.2f} GB VRAM)")
+            print(f"       GPU {idx}: {props.name} (sm_{props.major}{props.minor}, {vram_gb:.2f} GB VRAM)")
+        # Smoke-test actual CUDA kernel + cuDNN Conv2d (catches sm_120 / cuDNN mismatches immediately)
+        x = torch.randn(1, 3, 32, 32, device="cuda")
+        conv = torch.nn.Conv2d(3, 8, kernel_size=3, padding=1).cuda()
+        y = conv(x)
+        torch.cuda.synchronize()
+        print(f"  [OK] CUDA Conv2d smoke test   output={tuple(y.shape)} on {y.device}")
 
     # 3. jpeg2dct round-trip functional test
     from jpeg2dct.numpy import load as jpeg2dct_load
