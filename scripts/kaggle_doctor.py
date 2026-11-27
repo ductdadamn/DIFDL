@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Probe what a Kaggle session can do BEFORE running the real notebooks.
+
+Each stage runs a list of independent checks (one failure never stops the others) and prints
+`[PASS]/[FAIL] <check>: <detail>` plus a summary; results are also saved to
+/kaggle/working/doctor/<stage>.json. Paste the summary back when something fails.
+
+  python scripts/kaggle_doctor.py --stage env                          # Kaggle python: hw, disk, net, inputs
+  /tmp/venv_ocr/bin/python  scripts/kaggle_doctor.py --stage ocr       # PaddleOCR on 1 real receipt
+  /tmp/venv_lama/bin/python scripts/kaggle_doctor.py --stage lama      # LaMa on GPU, 1 synthetic inpaint
+  /tmp/DIFDL/.venv_anytext/bin/python scripts/kaggle_doctor.py --stage anytext [--full]
+        (--full also downloads the ~5-6GB weights and runs 1 edit)
+Stdlib-only at import time; runs on Python 3.10-3.13.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import time
+import traceback
+from pathlib import Path
+
+SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS))
+RESULTS: list[dict] = []
+
+
+def check(name, fn):
+    t0 = time.time()
+    try:
+        detail, ok = fn(), True
+    except (Exception, SystemExit) as exc:  # report and continue (resolve_* helpers raise SystemExit)
+        tb = traceback.format_exc().strip().splitlines()
+        detail, ok = f"{type(exc).__name__}: {exc} | " + " / ".join(tb[-4:-1]), False
+    dt = time.time() - t0
+    RESULTS.append({"check": name, "ok": ok, "detail": str(detail), "sec": round(dt, 1)})
+    print(f"[{'PASS' if ok else 'FAIL'}] {name} ({dt:.1f}s): {detail}", flush=True)
+
+
+def versions(*mods):
+    out = {}
+    for m in mods:
+        try:
+            mod = importlib.import_module(m)
+            out[m] = getattr(mod, "__version__", "?")
+        except Exception as exc:
+            out[m] = f"MISSING ({type(exc).__name__})"
+    return out
+
+
+def sh(cmd, timeout=30):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    return (r.stdout or r.stderr).strip()
+
+
+def first_receipt():
+    from synth_common import resolve_findit2_root
+    root = resolve_findit2_root("auto")
+    return sorted((root / "test").glob("*.png"))[0]
+
+
+# ----------------------------------------------------------------------------- stages
+def stage_env(args):
+    check("python", lambda: f"{sys.version.split()[0]} @ {sys.executable} | {platform.platform()}")
+    check("cpu_ram", lambda: f"{os.cpu_count()} cpus | " + next(
+        l for l in open("/proc/meminfo") if l.startswith("MemTotal")).strip())
+    def gpu():
+        out = sh("nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader")
+        if "MiB" not in out:
+            raise RuntimeError(f"no GPU visible (Accelerator = None?): {out[:120]}")
+        return out
+    check("gpu", gpu)
+    for d in ("/tmp", "/kaggle/working"):
+        check(f"disk {d}", lambda d=d: "free {:.1f} GB / total {:.1f} GB".format(
+            *(x / 1e9 for x in (shutil.disk_usage(d).free, shutil.disk_usage(d).total))))
+    check("tools", lambda: {t: bool(shutil.which(t)) for t in ("git", "curl", "bash", "gcc", "uv", "nvcc")})
+    check("env_vars", lambda: {k: v for k, v in os.environ.items()
+                               if k.startswith(("UV_", "PIP_", "CUDA", "PYTHON", "KAGGLE_KERNEL"))})
+    check("kernel_pkgs", lambda: versions("numpy", "PIL", "torch", "cv2", "matplotlib", "IPython"))
+
+    import urllib.request
+    urls = {"github": "https://github.com", "pypi": "https://pypi.org/simple/paddleocr/",
+            "pytorch_index": "https://download.pytorch.org/whl/cu121/torch/",
+            "uv_installer": "https://astral.sh/uv/install.sh",
+            "python_builds": "https://github.com/astral-sh/python-build-standalone/releases",
+            "paddle_models": "https://paddle-model-ecology.bj.bcebos.com/",
+            "huggingface": "https://huggingface.co", "modelscope": "https://www.modelscope.cn",
+            "lama_weights": "https://github.com/enesmsahin/simple-lama-inpainting/releases"}
+    for name, url in urls.items():
+        def probe(url=url):
+            req = urllib.request.Request(url, headers={"User-Agent": "difdl-doctor"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return f"HTTP {r.status}"
+            except urllib.error.HTTPError as e:  # reachable, just not a 200 page
+                return f"reachable (HTTP {e.code})"
+        check(f"net {name}", probe)
+
+    def inputs():
+        rows = []
+        for d in sorted(Path("/kaggle/input").rglob("*")):
+            if d.is_dir() and len(d.relative_to("/kaggle/input").parts) <= 4:
+                n = sum(1 for f in d.iterdir() if f.is_file())
+                rows.append(f"{d.relative_to('/kaggle/input')} ({n} files)")
+        return rows[:40]
+    check("kaggle_inputs", inputs)
+    check("findit2_auto", lambda: str(first_receipt().parent.parent))
+    check("tsroie_auto", lambda: str(__import__("synth_common").resolve_tsroie_root("auto")))
+
+
+def stage_ocr(args):
+    from importlib import metadata
+    check("versions", lambda: versions("paddle", "paddleocr", "paddlex", "numpy", "PIL", "cv2"))
+    check("declared_deps", lambda: {p: [r for r in (metadata.requires(p) or []) if "extra" not in r][:12]
+                                    for p in ("paddleocr", "paddlex")})
+    check("paddle_device", lambda: __import__("paddle").device.get_device())
+    state = {}
+
+    def build():
+        from select_edit_regions import ocr_paddle_factory
+        state["run"] = ocr_paddle_factory(args.det_model, args.rec_model)
+        return f"det={args.det_model} rec={args.rec_model}"
+    check("PaddleOCR init", build)
+
+    def run():
+        img = first_receipt()
+        t0 = time.time()
+        items = state["run"](img)
+        hs = sorted(it["box"][3] - it["box"][1] for it in items) or [0]
+        return (f"{img.name}: {len(items)} lines, {time.time() - t0:.1f}s, median h={hs[len(hs) // 2]}px, "
+                f"sample={items[:3]}")
+    check("PaddleOCR predict (1 receipt)", run)
+
+
+def stage_lama(args):
+    import numpy as np
+    check("versions", lambda: versions("torch", "torchvision", "numpy", "PIL", "cv2", "simple_lama_inpainting"))
+    import torch
+    check("cuda", lambda: f"{torch.cuda.is_available()} | {torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-'}"
+          f" | torch cuda {torch.version.cuda}")
+    state = {}
+
+    def load():
+        from simple_lama_inpainting import SimpleLama
+        try:
+            state["lama"] = SimpleLama(device=torch.device("cuda"))
+        except TypeError:
+            state["lama"] = SimpleLama()
+        return f"TORCH_HOME={os.environ.get('TORCH_HOME')}"
+    check("SimpleLama load (downloads big-lama.pt)", load)
+
+    def run():
+        from PIL import Image
+        img = first_receipt()
+        with Image.open(img) as im:
+            rgb = np.array(im.convert("RGB"))
+        h, w = rgb.shape[:2]
+        mask = np.zeros((h, w), np.uint8)
+        mask[h // 3:h // 3 + 30, w // 4:w // 2] = 255
+        torch.cuda.reset_peak_memory_stats()
+        t0 = time.time()
+        out = np.array(state["lama"](Image.fromarray(rgb), Image.fromarray(mask)))
+        return (f"in {rgb.shape} -> out {out.shape} in {time.time() - t0:.1f}s, "
+                f"peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.2f} GB")
+    check("LaMa inpaint (1 full receipt)", run)
+
+
+def stage_anytext(args):
+    check("versions", lambda: versions("torch", "torchvision", "numpy", "PIL", "cv2", "modelscope", "transformers",
+                                       "diffusers", "pytorch_lightning", "open_clip", "timm", "datasets"))
+    import torch
+    check("cuda", lambda: f"{torch.cuda.is_available()} | torch cuda {torch.version.cuda}")
+    ad = Path(args.anytext_dir).resolve()
+    check("anytext_repo", lambda: f"{ad} @ " + sh(f"git -C '{ad}' log -1 --format='%h %cs %s'"))
+    check("font", lambda: f"{(ad / 'font' / 'Arial_Unicode.ttf').stat().st_size} bytes")
+
+    def imp():
+        os.chdir(ad)
+        sys.path.insert(0, str(ad))
+        import ms_wrapper  # noqa: F401
+        from modelscope.pipelines import pipeline  # noqa: F401
+        return "ms_wrapper + modelscope.pipelines import OK"
+    check("import AnyText ms_wrapper", imp)
+    if not args.full:
+        print("(skip pipeline load: pass --full to download ~5-6GB weights and run 1 edit)")
+        return
+
+    state = {}
+
+    def load():
+        from modelscope.pipelines import pipeline
+        kw = dict(model="damo/cv_anytext_text_generation_editing", model_revision="v1.1.3")
+        try:
+            state["pipe"] = pipeline("my-anytext-task", use_fp16=True, use_translator=False, **kw)
+            return "use_fp16/use_translator kwargs accepted"
+        except TypeError:
+            state["pipe"] = pipeline("my-anytext-task", **kw)
+            return "fallback: pipeline without use_fp16/use_translator"
+    check("AnyText pipeline load", load)
+
+    def edit():
+        import numpy as np
+        img = np.full((512, 512, 3), 235, np.uint8)
+        pos = np.zeros((512, 512, 3), np.uint8)
+        pos[200:240, 150:330] = 255
+        t0 = time.time()
+        res, code, warn, _ = state["pipe"]({"prompt": 'a receipt with black printed text "12.50"', "seed": 42,
+                                            "draw_pos": pos, "ori_image": img},
+                                           mode="text-editing", image_count=1, ddim_steps=20, show_debug=False)
+        out = np.asarray(res[0]) if res else None
+        changed = None if out is None else float(np.abs(out.astype(int) - img.astype(int)).mean(axis=2)[200:240, 150:330].mean())
+        outside = None if out is None else float(np.abs(out.astype(int) - img.astype(int))[:150].mean())
+        return (f"code={code} warn={warn!r} out={None if out is None else out.shape} {time.time() - t0:.1f}s "
+                f"| mean|diff| inside box={changed} vs top area={outside} (inside >> outside => draw_pos polarity OK)")
+    check("AnyText text-editing (1 synthetic)", edit)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--stage", choices=["env", "ocr", "lama", "anytext"], required=True)
+    ap.add_argument("--det-model", default="PP-OCRv5_server_det")
+    ap.add_argument("--rec-model", default="PP-OCRv5_mobile_rec")
+    ap.add_argument("--anytext-dir", default="/tmp/DIFDL/third_party/AnyText")
+    ap.add_argument("--full", action="store_true")
+    ap.add_argument("--out", default="/kaggle/working/doctor")
+    args = ap.parse_args()
+
+    print(f"===== DOCTOR stage={args.stage} python={sys.version.split()[0]} =====", flush=True)
+    {"env": stage_env, "ocr": stage_ocr, "lama": stage_lama, "anytext": stage_anytext}[args.stage](args)
+
+    n_fail = sum(not r["ok"] for r in RESULTS)
+    print(f"===== SUMMARY stage={args.stage}: {len(RESULTS) - n_fail} PASS / {n_fail} FAIL =====")
+    for r in RESULTS:
+        if not r["ok"]:
+            print(f"  FAIL {r['check']}: {r['detail'][:400]}")
+    try:
+        Path(args.out).mkdir(parents=True, exist_ok=True)
+        (Path(args.out) / f"{args.stage}.json").write_text(json.dumps(RESULTS, indent=2, default=str))
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    main()

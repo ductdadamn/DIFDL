@@ -30,6 +30,10 @@ done
 export PATH="${HOME}/.local/bin:${PATH}"
 export UV_HTTP_TIMEOUT=300
 export UV_HTTP_RETRIES=5
+unset UV_SYSTEM_PYTHON  # Kaggle sets it; it only produces warnings for `uv venv`
+# Resolve every *transitive* dependency as of this date (AnyText v1.1.3 era). Exact pins alone are not
+# enough: unpinned sub-dependencies float to today's versions (see docs/KAGGLE_RUN_LOG.md, entry 3).
+ANYTEXT_EXCLUDE_NEWER="${ANYTEXT_EXCLUDE_NEWER:-2024-08-01T00:00:00Z}"
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "[INFO] Installing uv..."
@@ -50,8 +54,14 @@ uv venv --clear "${VENV_DIR}" --python 3.10 --seed
 echo "[INFO] Installing AnyText PyTorch (${CUDA_TAG}) & dependencies..."
 uv pip install --python "${VENV_DIR}/bin/python" "setuptools<70" wheel "Cython<3.0"
 
-uv pip install --python "${VENV_DIR}/bin/python" --no-build-isolation \
+# torch first, without --exclude-newer (the PyTorch index may not publish upload times)
+uv pip install --python "${VENV_DIR}/bin/python" \
     --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}" \
+    "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}"
+
+# everything else from PyPI, frozen at ANYTEXT_EXCLUDE_NEWER (already-installed torch satisfies its pins)
+uv pip install --python "${VENV_DIR}/bin/python" --no-build-isolation \
+    --exclude-newer "${ANYTEXT_EXCLUDE_NEWER}" \
     "setuptools<70" \
     "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}" \
     "numpy==1.23.5" "scipy==1.10.1" "Pillow==9.5.0" \

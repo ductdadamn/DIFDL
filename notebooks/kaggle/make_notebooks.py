@@ -73,6 +73,66 @@ display(Image(filename=f"{{OUT}}/qa/{gen}_contact_sheet.png", width=900))
 print(json.dumps(json.load(open(f"{{OUT}}/qa/{gen}_report.json"))["hard_failure_counts"], indent=2))
 '''
 
+FONT = r'''
+# AnyText only needs *a* TTF at font/Arial_Unicode.ttf; DejaVuSans (bundled with matplotlib) covers Latin + digits
+import matplotlib, shutil
+from pathlib import Path
+src = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSans.ttf"
+dst = Path("/tmp/DIFDL/third_party/AnyText/font/Arial_Unicode.ttf"); dst.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy(src, dst); print("font ->", dst)
+os.environ["MODELSCOPE_CACHE"] = "/tmp/ms"; os.environ["HF_HOME"] = "/tmp/hf"
+PY = "/tmp/DIFDL/.venv_anytext/bin/python"
+'''
+
+# ------------------------------------------------------------------ 00 doctor (GPU)
+NB0 = build(0, [
+    ("md", '''
+# 00 — Doctor: kiểm tra Kaggle làm được gì TRƯỚC khi chạy 01/02/03
+**Settings:** Accelerator = **GPU T4**, Internet = On, Add Input = dataset findit2.
+Mỗi cell in `[PASS]/[FAIL] ...` và một dòng `SUMMARY`; một check lỗi không chặn các check khác.
+**Gửi lại:** chỉ cần các dòng `SUMMARY` + `FAIL` (cell cuối gom sẵn). Kết quả cũng lưu ở `/kaggle/working/doctor/*.json`.
+Thời gian: ~20–30 phút (dựng 3 venv). Venv nằm trong `/tmp`, nên chỉ dùng lại được trong cùng session.
+'''),
+    ("code", CLONE),
+    ("md", "## 1. Phần cứng, ổ đĩa, mạng tới từng nguồn tải, dataset (Python của Kaggle)"),
+    ("code", '''
+!python scripts/kaggle_doctor.py --stage env
+'''),
+    ("md", "## 2. Venv OCR (paddle) + chạy OCR trên 1 hóa đơn thật"),
+    ("code", '''
+os.environ["PADDLE_PDX_CACHE_HOME"] = "/tmp/paddlex"
+!bash scripts/setup_kaggle_venv.sh ocr
+!/tmp/venv_ocr/bin/python scripts/kaggle_doctor.py --stage ocr
+'''),
+    ("md", "## 3. Venv LaMa + inpaint 1 hóa đơn trên GPU"),
+    ("code", '''
+os.environ["TORCH_HOME"] = "/tmp/torch"
+!bash scripts/setup_kaggle_venv.sh lama
+!/tmp/venv_lama/bin/python scripts/kaggle_doctor.py --stage lama
+'''),
+    ("md", "## 4. Env AnyText (~10–15 phút) + import"),
+    ("code", '''
+!bash scripts/setup_anytext.sh 2>&1 | tail -n 5
+'''),
+    ("code", FONT),
+    ("code", '''
+!{PY} scripts/kaggle_doctor.py --stage anytext
+'''),
+    ("md", "## 5. (Tùy chọn, ~10 phút + 5–6GB) Tải trọng số AnyText và thử sửa 1 ảnh — kiểm tra luôn chiều `draw_pos`"),
+    ("code", '''
+!{PY} scripts/kaggle_doctor.py --stage anytext --full
+'''),
+    ("md", "## 6. Tóm tắt để gửi lại"),
+    ("code", '''
+import json, glob
+for f in sorted(glob.glob("/kaggle/working/doctor/*.json")):
+    res = json.load(open(f)); fails = [r for r in res if not r["ok"]]
+    print(f"{f.split('/')[-1]}: {len(res) - len(fails)} PASS / {len(fails)} FAIL")
+    for r in fails:
+        print("   FAIL", r["check"], "->", r["detail"][:500])
+'''),
+], gpu=True)
+
 # ------------------------------------------------------------------ 01 prep (CPU)
 NB1 = build(1, [
     ("md", '''
@@ -152,16 +212,7 @@ Output: `/kaggle/working/data_synth/anytext/test/{images,masks,pristine,raw}/` +
     ("code", '''
 !bash scripts/setup_anytext.sh 2>&1 | tail -n 5
 '''),
-    ("code", '''
-# AnyText only needs *a* TTF at font/Arial_Unicode.ttf; DejaVuSans (bundled with matplotlib) covers Latin + digits
-import matplotlib, shutil
-from pathlib import Path
-src = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSans.ttf"
-dst = Path("/tmp/DIFDL/third_party/AnyText/font/Arial_Unicode.ttf"); dst.parent.mkdir(parents=True, exist_ok=True)
-shutil.copy(src, dst); print("font ->", dst)
-os.environ["MODELSCOPE_CACHE"] = "/tmp/ms"; os.environ["HF_HOME"] = "/tmp/hf"
-PY = "/tmp/DIFDL/.venv_anytext/bin/python"
-'''),
+    ("code", FONT),
     ("code", FIND_PREP.format(gen="anytext")),
     ("md", '''
 ## 2. Smoke test 5 mẫu
@@ -191,7 +242,7 @@ for e in [json.loads(l) for l in open(MAN)][:5]:
 ], gpu=True)
 
 if __name__ == "__main__":
-    for name, book in [("01_prep_findit2.ipynb", NB1), ("02_lama_findit2.ipynb", NB2),
+    for name, book in [("00_doctor.ipynb", NB0), ("01_prep_findit2.ipynb", NB1), ("02_lama_findit2.ipynb", NB2),
                        ("03_anytext_findit2.ipynb", NB3)]:
         (HERE / name).write_text(json.dumps(book, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print("wrote", HERE / name)

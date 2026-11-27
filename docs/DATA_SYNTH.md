@@ -35,6 +35,8 @@ Ba notebook trong [`notebooks/kaggle/`](../notebooks/kaggle/). Lên Kaggle chọ
 
 **Môi trường cô lập (quan trọng):** image Kaggle thay đổi không báo trước (11/2026 đang là Python 3.13, numpy 2, Pillow 13), và cài package không ghim phiên bản từng gây lỗi (`paddleocr` 3.7 kéo model PP-OCRv6 mà `paddle` 3.0 không đọc được). Vì vậy **mọi script đều chạy trong venv Python 3.10 ghim phiên bản** đặt ở `/tmp`, dựng bằng `uv`: `scripts/setup_kaggle_venv.sh ocr|lama` và `scripts/setup_anytext.sh`. Python của Kaggle chỉ dùng để clone repo và hiển thị ảnh. Notebook được sinh từ [`notebooks/kaggle/make_notebooks.py`](../notebooks/kaggle/make_notebooks.py): sửa file này rồi chạy lại để tạo notebook, không sửa `.ipynb` bằng tay. Các cell code có nhãn `# NBx-y` để báo lỗi theo nhãn.
 
+**Chạy `00_doctor` trước (GPU T4, ~20–30 phút)** trên một session mới. Notebook này kiểm tra GPU, ổ đĩa, mạng tới từng nguồn tải và dataset, rồi dựng thử 3 venv và chạy mỗi tool trên 1 ảnh. Chỉ chạy 01/02/03 khi không còn `FAIL`. Các lần lỗi và bài học được ghi trong [KAGGLE_RUN_LOG.md](KAGGLE_RUN_LOG.md).
+
 Cả ba notebook đều bật **Internet = On**. Notebook 01 phải **Save Version (Save & Run All)** xong trước, rồi notebook 02/03 mới thêm output của nó qua *Add Input → Your Work*. Hai notebook 02 và 03 chạy song song được.
 
 Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `--tsroie-root auto`): tìm thư mục có đủ `train.txt`, `val.txt`, `test.txt` + `train/`, và thư mục `*SROIE*` có `images/` + `masks/`. Nếu tìm thấy 0 hoặc từ 2 kết quả trở lên, script dừng và yêu cầu truyền đường dẫn cụ thể.
