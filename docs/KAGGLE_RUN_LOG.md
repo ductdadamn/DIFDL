@@ -134,6 +134,17 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 
 ---
 
+## #11 — NB0-5 (setup AnyText), run 4 (27/11/2026): `AttributeError: module 'open_clip' has no attribute '__version__'`
+- **Triệu chứng:** mọi package đã cài xong, nhưng dòng kiểm tra cuối của `setup_anytext.sh` crash khi in `open_clip.__version__`. Do `set -e`, script dừng luôn: không ghi `.ok`, chưa chạy import scan (#10).
+- **Nguyên nhân gốc:** `open_clip_torch==2.7.0` (bản ghim theo `environment.yaml`) không export `__version__` ở cấp package; chỉ các bản mới hơn mới có. Câu lệnh in version được viết theo thói quen với bản mới, chưa từng chạy với bản 2.7.0.
+- **Cách sửa (commit này):**
+  - Setup lấy version qua `importlib.metadata.version('<tên distribution>')` thay vì `module.__version__`.
+  - `versions()` của doctor: nếu module không có `__version__` thì hỏi `importlib.metadata` (qua `packages_distributions`), không trả `?` nữa.
+  - Danh sách package không đổi nên không cần tăng `deps=`. Vì `.ok` chưa được ghi, chạy lại NB0-5 sẽ cài lại (nhanh, nhờ cache của uv) rồi chạy tiếp import scan.
+- **Bài học:** câu lệnh kiểm tra cũng là code. Đọc version phải qua metadata của distribution, không qua thuộc tính của module.
+
+---
+
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
 | Rủi ro | Doctor check phát hiện | Phương án nếu FAIL |
 |---|---|---|

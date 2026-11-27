@@ -78,9 +78,10 @@ echo "[INFO] AnyText deps (environment.yaml pins, snapshot ${ANYTEXT_EXCLUDE_NEW
 echo "[INFO] Verifying AnyText venv..."
 OKTXT="$("${PY}" -c "
 import torch, pytorch_lightning, transformers, modelscope, open_clip, diffusers, cv2, numpy
-print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| lightning', pytorch_lightning.__version__,
-      '| transformers', transformers.__version__, '| modelscope', modelscope.__version__,
-      '| open_clip', open_clip.__version__, '| numpy', numpy.__version__)
+from importlib.metadata import version as v  # open_clip 2.7.0 has no __version__ attribute (KAGGLE_RUN_LOG #11)
+print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| lightning', v('pytorch-lightning'),
+      '| transformers', v('transformers'), '| modelscope', v('modelscope'),
+      '| open_clip', v('open_clip_torch'), '| numpy', v('numpy'))
 ")"
 # every module the AnyText inference code can import must resolve (static scan, nothing executed)
 "${PY}" "${SCRIPT_DIR}/anytext_import_scan.py" --anytext-dir "${ANYTEXT_DIR}"

@@ -49,7 +49,14 @@ def versions(*mods):
     for m in mods:
         try:
             mod = importlib.import_module(m)
-            out[m] = getattr(mod, "__version__", "?")
+            ver = getattr(mod, "__version__", None)
+            if ver is None:  # e.g. open_clip 2.7.0: no __version__ -> ask the installed distribution
+                from importlib.metadata import PackageNotFoundError, packages_distributions, version
+                try:
+                    ver = version(packages_distributions().get(m, [m])[0])
+                except PackageNotFoundError:
+                    ver = "?"
+            out[m] = ver
         except Exception as exc:
             out[m] = f"MISSING ({type(exc).__name__})"
     return out
