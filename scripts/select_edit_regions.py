@@ -154,9 +154,18 @@ class Receipt:
         self.k = 0
         self.args = args
         self._gray = None
+        self._text_mask = None
         hs = [it["box"][3] - it["box"][1] for it in items]
-        self.text_mask = dilate(boxes_to_mask(self.h, self.w, [it["box"] for it in items]), 6)
         self.median_h = int(np.median(hs)) if hs else 20
+
+    @property
+    def text_mask(self):
+        # Lazy: only Insertion needs it (test receipts). Growing each box by 6px == a square 13x13
+        # dilation of the union of boxes, but O(#boxes) instead of a full-res MaxFilter (which took
+        # minutes per 7016x4961 scan and ran for all 825 receipts on CPU).
+        if self._text_mask is None:
+            self._text_mask = boxes_to_mask(self.h, self.w, [it["box"] for it in self.items], dilate=6)
+        return self._text_mask
 
     def gray(self):
         if self._gray is None:
@@ -316,6 +325,7 @@ def main():
         return
     build_cache(args, names)
 
+    print("[SELECT] loading OCR cache + choosing edit regions (CPU, ~1 min)...", flush=True)
     receipts = {s: [] for s in SPLITS}
     stats = Counter()
     for s in SPLITS:

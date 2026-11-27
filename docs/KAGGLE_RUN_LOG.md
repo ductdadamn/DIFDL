@@ -74,6 +74,17 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
   - Notebook 01 chuyển sang GPU T4. Doctor kiểm tra mạng tới index Paddle và in thiết bị OCR sẽ dùng.
 - **Bài học:** "ghim phiên bản" phải bao gồm cả **biến thể phần cứng** của gói (CPU/GPU là hai tên gói khác nhau). In tốc độ/ETA ngay từ đầu để phát hiện chậm sớm, thay vì đợi hết.
 
+## #7 — NB1-5, run 2 (27/11/2026): OCR GPU xong `825/825 1.2s/receipt` nhưng cell vẫn chạy lâu trên CPU
+- **Triệu chứng:** OCR trên GPU xong khoảng 17 phút, sau đó cell vẫn chạy và Kaggle chỉ thấy CPU hoạt động, không có dòng log nào.
+- **Nguyên nhân gốc:**
+  - Bước chọn vùng sửa (chạy CPU, đúng như thiết kế) tạo `Receipt.text_mask` cho **cả 825 hóa đơn** bằng `MaxFilter(13)` của PIL trên ảnh độ phân giải gốc.
+  - Đo được: 0.7 s cho ảnh 932×1697, và **13.5 s** cho ảnh scan 7016×4961 (có trong findit2, xem log `max_side_limit`).
+  - Trong khi đó mask này chỉ phục vụ Insertion, tức chỉ hóa đơn test.
+- **Cách sửa (commit này):**
+  - Mask được tạo lazy, và nới mỗi box thêm 6px thay vì dilation. Kết quả **giống hệt từng pixel** (đã kiểm chứng), nhưng chỉ mất ~0.007 s/ảnh.
+  - In thêm `[SELECT] ...` để biết đang ở bước nào.
+- **Bài học:** đo luôn cả bước "nhẹ" sau bước nặng, vì dữ liệu thật có ảnh lớn hơn median rất nhiều. Mỗi pha dài phải in log tiến độ.
+
 ---
 
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
