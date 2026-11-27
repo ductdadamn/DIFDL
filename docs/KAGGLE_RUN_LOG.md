@@ -85,6 +85,21 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
   - In thêm `[SELECT] ...` để biết đang ở bước nào.
 - **Bài học:** đo luôn cả bước "nhẹ" sau bước nặng, vì dữ liệu thật có ảnh lớn hơn median rất nhiều. Mỗi pha dài phải in log tiến độ.
 
+## #8 — NB2-4 (smoke 10 mẫu LaMa), run 1 (27/11/2026): `CUDA out of memory. Tried to allocate 25.45 GiB`
+- **Triệu chứng:** 4 mẫu đầu sinh tốt. Tới mẫu thứ 5 thì TorchScript của LaMa OOM. Cảnh báo `cudnnException ... NOT_SUPPORTED` đi kèm vô hại: cuDNN chỉ thử một plan khác.
+- **Nguyên nhân gốc:**
+  - Thiết kế cũ cho LaMa inpaint **cả tấm hóa đơn** ở độ phân giải gốc để có ngữ cảnh giấy.
+  - findit2 có các bản scan cỡ 7016×4961 (đã thấy ở #7). Bộ nhớ của FFC/FFT tăng theo diện tích ảnh, nên cần khoảng 25 GiB, trong khi T4 chỉ có 16 GB.
+  - Smoke test và doctor chỉ thử ảnh cỡ median nên không bắt được.
+- **Cách sửa (commit này):**
+  - LaMa chỉ inpaint một **cửa sổ ngữ cảnh**: mảnh 512 nới thêm `--context 256` px mỗi phía (tối đa 1024×1024), vẫn ở độ phân giải gốc, không resize.
+  - Khi OOM thì thử lại với 128, rồi 0. Mẫu lỗi được liệt kê ở cuối, các mẫu khác chạy tiếp (trước đây một mẫu lỗi làm chết cả cell).
+  - Kiểm tra thêm: mask phải nằm trọn trong crop.
+  - Phát hiện kèm: venv LaMa in `want=cpu` (nhãn chỉ dành cho OCR), đã đổi thành `want=n/a`.
+- **Bài học:**
+  - Smoke test phải gồm **ca biên của dữ liệu** (ảnh lớn nhất), không chỉ N mẫu đầu.
+  - Vòng lặp sinh dữ liệu dài phải chịu lỗi từng mẫu, không được để một mẫu làm chết cả lần chạy.
+
 ---
 
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)

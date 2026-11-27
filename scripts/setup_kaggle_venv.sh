@@ -28,8 +28,9 @@ case "${NAME}" in
 esac
 
 # ocr: GPU build if a GPU is visible (override: OCR_DEVICE=cpu|gpu); recorded in .ok as want=...
-WANT_DEVICE=cpu
+WANT_DEVICE=n/a  # only meaningful for ocr
 if [ "${NAME}" = ocr ]; then
+    WANT_DEVICE=cpu
     if [ -n "${OCR_DEVICE:-}" ]; then WANT_DEVICE="${OCR_DEVICE}"
     elif nvidia-smi -L >/dev/null 2>&1; then WANT_DEVICE=gpu; fi
     echo "[ocr] wanted device: ${WANT_DEVICE}"
