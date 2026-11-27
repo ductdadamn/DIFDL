@@ -3,8 +3,10 @@
 # AnyText isolated environment (Kaggle T4 / Lab Server), inference only.
 #
 # Versions follow AnyText's own environment.yaml (torch 2.0.1, transformers 4.30.2,
-# open_clip 2.7.0, torchmetrics 0.11.4, modelscope 1.10.0, ...) minus demo/translator-only
-# packages (gradio, streamlit, tensorflow). Every transitive dependency is resolved as of
+# open_clip 2.7.0, torchmetrics 0.11.4, modelscope 1.10.0, ...) minus demo/translator/training-only
+# packages (gradio, streamlit, tensorflow, basicsr, ...). Packages that environment.yaml only pulled in
+# INDIRECTLY but the inference code imports (scikit-image via basicsr -> cldm/recognizer.py, six) are
+# listed explicitly; scripts/anytext_import_scan.py verifies the whole import tree (KAGGLE_RUN_LOG #10). Every transitive dependency is resolved as of
 # ANYTEXT_EXCLUDE_NEWER, the AnyText v1.1 release era (see docs/KAGGLE_RUN_LOG.md #3, #4).
 # The AnyText repo is pinned to a commit. Model weights are downloaded separately by
 # scripts/download_anytext_model.sh (modelscope 1.10 cannot download from today's hub).
@@ -30,7 +32,7 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
-STAMP="snapshot=${ANYTEXT_EXCLUDE_NEWER} commit=${ANYTEXT_COMMIT} cuda=${CUDA_TAG}"
+STAMP="snapshot=${ANYTEXT_EXCLUDE_NEWER} commit=${ANYTEXT_COMMIT} cuda=${CUDA_TAG} deps=2"  # bump deps= when the package list changes
 
 export PATH="${HOME}/.local/bin:${PATH}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv_cache}" UV_HTTP_TIMEOUT=300 UV_HTTP_RETRIES=5
@@ -67,7 +69,7 @@ echo "[INFO] AnyText deps (environment.yaml pins, snapshot ${ANYTEXT_EXCLUDE_NEW
     "transformers==4.30.2" "kornia==0.6.7" "open_clip_torch==2.7.0" "timm==0.6.7" \
     "addict==2.4.0" "safetensors==0.4.0" "modelscope==1.10.0" "easydict==1.10" \
     "diffusers==0.10.2" "imageio==2.9.0" "jieba==0.42.1" "sentencepiece==0.1.99" \
-    "ujson" "fsspec" "tqdm" "scipy" "simplejson" "sortedcontainers" "datasets" "oss2"
+    "ujson" "fsspec" "tqdm" "scipy" "simplejson" "sortedcontainers" "datasets" "oss2"     "scikit-image" "six" "matplotlib"
 
 # xformers is optional (speed only); never fail the setup because of it
 "${UVI[@]}" --exclude-newer "${ANYTEXT_EXCLUDE_NEWER}" "xformers==0.0.20" \
@@ -80,6 +82,8 @@ print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| lightn
       '| transformers', transformers.__version__, '| modelscope', modelscope.__version__,
       '| open_clip', open_clip.__version__, '| numpy', numpy.__version__)
 ")"
+# every module the AnyText inference code can import must resolve (static scan, nothing executed)
+"${PY}" "${SCRIPT_DIR}/anytext_import_scan.py" --anytext-dir "${ANYTEXT_DIR}"
 printf '%s\n%s\n' "${OKTXT}" "${STAMP}" > "${VENV_DIR}/.ok"
 "${PY}" -m pip freeze > "${VENV_DIR}/freeze.txt" 2>/dev/null || true
 cat "${VENV_DIR}/.ok"

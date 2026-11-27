@@ -119,6 +119,19 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
   - **Không lặng lẽ chuyển sang phương án khác** khi bước trước đã lỗi, vì như vậy lỗi gốc sẽ bị che mất.
   - Kiểm tra kích thước repo trước khi ước lượng thời gian và dung lượng ổ đĩa.
 
+## #10 — NB0-9 (doctor `anytext --full`), run 3 (27/11/2026): `ModuleNotFoundError: AnyTextPipeline: No module named 'skimage'`
+- **Tiến triển:** bản sửa #9 hoạt động. Model tải về được từ ModelScope (`damo/...`), và NB0-8 cho 6 PASS / 0 FAIL.
+- **Triệu chứng:** khi load pipeline thì thiếu `skimage`.
+- **Nguyên nhân gốc:**
+  - `cldm/recognizer.py` của AnyText import `skimage` (dùng `_umeyama`), nhưng `environment.yaml` không ghi `scikit-image`. Gói này chỉ được kéo vào **gián tiếp** qua `basicsr==1.4.2`.
+  - Lúc dựng venv, mình bỏ các gói "chỉ dùng cho demo/train" (basicsr, gradio, tensorflow…) mà không kiểm tra **cây import thực tế**, nên làm rơi luôn dependency gián tiếp này.
+  - Check `import modelscope.pipelines` của doctor không bắt được, vì code của AnyText chỉ được import khi load pipeline.
+- **Cách sửa (commit này):**
+  - Thêm `scikit-image`, `six`, `matplotlib` vào `setup_anytext.sh` (vẫn khóa theo snapshot). Tăng `deps=2` trong stamp để venv cũ tự được dựng lại.
+  - Thêm `scripts/anytext_import_scan.py`: quét tĩnh bằng `ast`, không chạy code, bắt đầu từ `ms_wrapper.py` và đi theo **mọi** import cục bộ trong repo (kể cả import trong hàm). Script liệt kê mọi module bên thứ ba, rồi kiểm tra bằng `find_spec` trong chính venv.
+  - Setup chạy bước quét này trước khi ghi `.ok`, và doctor có thêm check `import scan`. Thiếu module nào thì báo **tất cả cùng lúc**, kèm file import nó, thay vì mỗi lần chạy chỉ lộ ra một lỗi.
+- **Bài học:** khi rút gọn danh sách package của một repo ngoài, phải **kiểm tra cây import thực tế** bằng máy, không đoán theo tên package. Gói trung gian (basicsr) có thể là thứ duy nhất kéo vào một dependency thật.
+
 ---
 
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)

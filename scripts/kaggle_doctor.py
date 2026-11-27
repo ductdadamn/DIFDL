@@ -190,6 +190,17 @@ def stage_anytext(args):
 
     check("import modelscope.pipelines", lambda: (__import__("modelscope.pipelines"), "OK")[1])
 
+    def import_scan():
+        import importlib.util
+        from anytext_import_scan import DEFAULT_ROOTS, OPTIONAL, scan
+        wrapper = Path(args.model if args.model != "auto" else "/tmp/anytext_model") / "ms_wrapper.py"
+        external, files = scan(ad, [wrapper] if wrapper.exists() else [], DEFAULT_ROOTS)
+        missing = sorted(m for m in external if m not in OPTIONAL and importlib.util.find_spec(m) is None)
+        if missing:
+            raise RuntimeError(f"missing modules {missing} <- " + "; ".join(f"{m}: {sorted(external[m])[:2]}" for m in missing))
+        return f"{len(files)} files, {len(external)} third-party modules all importable"
+    check("import scan (ms_wrapper + repo, transitive)", import_scan)
+
     def model_dir():
         from anytext_loader import resolve_model
         model, is_local = resolve_model(args.model)
