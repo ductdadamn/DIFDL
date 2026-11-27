@@ -91,6 +91,7 @@ def stage_env(args):
             "uv_installer": "https://astral.sh/uv/install.sh",
             "python_builds": "https://github.com/astral-sh/python-build-standalone/releases",
             "paddle_models": "https://paddle-model-ecology.bj.bcebos.com/",
+            "paddle_gpu_index": "https://www.paddlepaddle.org.cn/packages/stable/cu126/paddlepaddle-gpu/",
             "huggingface": "https://huggingface.co", "modelscope": "https://www.modelscope.cn",
             "lama_weights": "https://github.com/enesmsahin/simple-lama-inpainting/releases"}
     for name, url in urls.items():
@@ -120,17 +121,23 @@ def stage_ocr(args):
     check("versions", lambda: versions("paddle", "paddleocr", "paddlex", "numpy", "PIL", "cv2"))
     check("declared_deps", lambda: {p: [r for r in (metadata.requires(p) or []) if "extra" not in r][:12]
                                     for p in ("paddleocr", "paddlex")})
-    check("paddle_device", lambda: __import__("paddle").device.get_device())
+    def paddle_dev():
+        import paddle
+        from select_edit_regions import resolve_paddle_device
+        return (f"compiled_with_cuda={paddle.device.is_compiled_with_cuda()} | default={paddle.device.get_device()}"
+                f" | OCR will use {resolve_paddle_device(args.device)}")
+    check("paddle_device", paddle_dev)
     state = {}
 
     def build():
         from select_edit_regions import ocr_paddle_factory
-        state["run"] = ocr_paddle_factory(args.det_model, args.rec_model)
-        return f"det={args.det_model} rec={args.rec_model}"
+        state["run"] = ocr_paddle_factory(args.det_model, args.rec_model, args.device)
+        return f"det={args.det_model} rec={args.rec_model} device={args.device}"
     check("PaddleOCR init", build)
 
     def run():
         img = first_receipt()
+        state["run"](img)  # warm-up (first GPU call compiles kernels)
         t0 = time.time()
         items = state["run"](img)
         hs = sorted(it["box"][3] - it["box"][1] for it in items) or [0]
@@ -228,6 +235,7 @@ def main():
     ap.add_argument("--stage", choices=["env", "ocr", "lama", "anytext"], required=True)
     ap.add_argument("--det-model", default="PP-OCRv5_server_det")
     ap.add_argument("--rec-model", default="PP-OCRv5_mobile_rec")
+    ap.add_argument("--device", default="auto", help="ocr stage: auto | gpu:0 | cpu")
     ap.add_argument("--anytext-dir", default="/tmp/DIFDL/third_party/AnyText")
     ap.add_argument("--full", action="store_true")
     ap.add_argument("--model", default="auto", help="AnyText model: auto (/tmp/anytext_model) | dir | hub id")

@@ -34,15 +34,29 @@ DIGIT = re.compile(r"\d")
 
 
 # ----------------------------------------------------------------------------- OCR
-def ocr_paddle_factory(det_model="PP-OCRv5_server_det", rec_model="PP-OCRv5_mobile_rec"):
+def resolve_paddle_device(device="auto"):
+    """'auto' -> 'gpu:0' if this paddle build has CUDA and sees a GPU, else 'cpu'."""
+    if device != "auto":
+        return device
+    import paddle
+    try:
+        ok = paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0
+    except Exception:
+        ok = False
+    return "gpu:0" if ok else "cpu"
+
+
+def ocr_paddle_factory(det_model="PP-OCRv5_server_det", rec_model="PP-OCRv5_mobile_rec", device="auto"):
     # Pin model names explicitly: letting paddleocr pick defaults pulled PP-OCRv6 models that the
     # pinned paddle runtime cannot load. det = same model as src/seg_char.py.
     os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
     from paddleocr import PaddleOCR
 
+    device = resolve_paddle_device(device)
+    print(f"[OCR] PaddleOCR device = {device}  (det={det_model}, rec={rec_model})", flush=True)
     ocr = PaddleOCR(text_detection_model_name=det_model, text_recognition_model_name=rec_model,
                     use_doc_orientation_classify=False, use_doc_unwarping=False,
-                    use_textline_orientation=False)
+                    use_textline_orientation=False, device=device)
 
     def _get(res, key):
         try:
@@ -90,14 +104,18 @@ def build_cache(args, names_by_split):
     if todo and args.ocr_source == "cache":
         raise SystemExit(f"[ERROR] {len(todo)} receipts have no OCR cache and --ocr-source=cache")
     if todo:
-        runner = ocr_paddle_factory(args.det_model, args.rec_model) if args.ocr_source == "paddle" \
+        runner = ocr_paddle_factory(args.det_model, args.rec_model, args.device) if args.ocr_source == "paddle" \
             else ocr_sroie_factory(args.sroie_box_dir)
-        print(f"[OCR] Running {args.ocr_source} on {len(todo)} receipts...")
+        print(f"[OCR] Running {args.ocr_source} on {len(todo)} receipts "
+              f"({sum(1 for s in SPLITS for _ in names_by_split[s]) - len(todo)} already cached)...", flush=True)
+    import time
+    t0 = time.time()
     for i, (s, n) in enumerate(todo, 1):
         items = runner(args.findit2_root / s / n)
         (args.ocr_cache / (Path(n).stem + ".json")).write_text(json.dumps(items), encoding="utf-8")
-        if i % 50 == 0:
-            print(f"  {i}/{len(todo)}")
+        if i % 25 == 0 or i == len(todo):
+            el = time.time() - t0
+            print(f"  {i}/{len(todo)}  {el / i:.1f}s/receipt  ETA {(len(todo) - i) * el / i / 60:.1f} min", flush=True)
 
 
 # ----------------------------------------------------------------------------- text helpers
@@ -274,6 +292,7 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--det-model", default="PP-OCRv5_server_det")
     ap.add_argument("--rec-model", default="PP-OCRv5_mobile_rec")
+    ap.add_argument("--device", default="auto", help="PaddleOCR device: auto (gpu:0 if available) | gpu:0 | cpu")
     ap.add_argument("--ocr-test", type=int, default=0, metavar="N",
                     help="smoke test: OCR the first N test receipts, print lines + timing, write nothing, exit")
     args = ap.parse_args()
@@ -284,7 +303,7 @@ def main():
     names = load_split_lists(args.splits_dir)
     if args.ocr_test:
         import time
-        run = ocr_paddle_factory(args.det_model, args.rec_model) if args.ocr_source == "paddle" \
+        run = ocr_paddle_factory(args.det_model, args.rec_model, args.device) if args.ocr_source == "paddle" \
             else ocr_sroie_factory(args.sroie_box_dir)
         for n in names["test"][:args.ocr_test]:
             t0 = time.time()

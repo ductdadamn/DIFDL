@@ -65,6 +65,15 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 - **Cách sửa (commit này):** thay bằng check "thư mục model có đủ `ms_wrapper.py` + `configuration.json`", và bỏ đoạn import sai trong script sinh dữ liệu.
 - **Bài học:** check chẩn đoán cũng là code và cũng cần kiểm chứng. Một FAIL có thể là do giả định của check sai, không nhất thiết là môi trường lỗi.
 
+## #6 — NB1-5, run 1 (27/11/2026): OCR toàn bộ trên CPU chạy quá lâu
+- **Triệu chứng:** không có lỗi, nhưng OCR ~825 hóa đơn (`PP-OCRv5_server_det`, ảnh ~932×1697) trên 4 nhân CPU của Kaggle chậm tới mức không chấp nhận được.
+- **Nguyên nhân gốc:** gói PyPI `paddlepaddle` **chỉ có CPU**. Bản GPU là gói khác, `paddlepaddle-gpu`, và bản 3.0.0 chỉ có trên index riêng của Paddle (PyPI dừng ở 2.6). Notebook 01 lại được đặt `Accelerator = None`.
+- **Cách sửa (commit này):**
+  - `setup_kaggle_venv.sh ocr` tự phát hiện GPU (`nvidia-smi`). Có GPU thì cài `paddlepaddle-gpu==3.0.0` từ index Paddle (thử `cu126` rồi `cu118`), **không** qua snapshot giống torch, rồi chạy phép nhân ma trận trên GPU để kiểm tra. Nếu thất bại thì tự lùi về bản CPU, không bao giờ để venv hỏng. Ép thiết bị bằng `OCR_DEVICE=cpu|gpu`. Kết quả ghi vào `.ok` (`device=`, `want=`).
+  - `select_edit_regions.py --device auto|gpu:0|cpu` (mặc định auto) và in `s/receipt` + ETA mỗi 25 hóa đơn.
+  - Notebook 01 chuyển sang GPU T4. Doctor kiểm tra mạng tới index Paddle và in thiết bị OCR sẽ dùng.
+- **Bài học:** "ghim phiên bản" phải bao gồm cả **biến thể phần cứng** của gói (CPU/GPU là hai tên gói khác nhau). In tốc độ/ETA ngay từ đầu để phát hiện chậm sớm, thay vì đợi hết.
+
 ---
 
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
@@ -74,4 +83,4 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 | Server ModelScope đổi hành vi lần nữa (client mới cũng hỏng) | `download_anytext_model.sh` | Tải từ mirror HuggingFace hoặc upload trọng số thành Kaggle Dataset rồi `--model <dir>` |
 | `uv` không resolve được torch khi có snapshot (lỗi "no version of torch") | build venv lama / anytext | Bỏ torch khỏi lệnh cài thứ hai trong script setup |
 | Chiều của `draw_pos` (trắng/đen) | `anytext --full: text-editing` (so diff trong box với ngoài box) | `--draw-pos-format file` |
-| OCR CPU quá chậm (>8 s/hóa đơn) | `ocr: PaddleOCR predict` (thời gian) | Đổi det sang `PP-OCRv5_mobile_det` |
+| `paddlepaddle-gpu` không cài/chạy được (index Paddle chậm/không vào được, lệch cuDNN) | NB1-2 in `[WARN] ... falling back to CPU`; doctor `net paddle_gpu_index`, `paddle_device` | Tự lùi về CPU; nếu CPU vẫn chậm, thêm `--det-model PP-OCRv5_mobile_det` vào NB1-5 |

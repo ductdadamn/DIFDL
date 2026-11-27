@@ -137,18 +137,20 @@ for f in sorted(glob.glob("/kaggle/working/doctor/*.json")):
 '''),
 ], gpu=True)
 
-# ------------------------------------------------------------------ 01 prep (CPU)
+# ------------------------------------------------------------------ 01 prep (GPU, CPU fallback)
 NB1 = build(1, [
     ("md", '''
-# 01 — Chia split & chọn vùng sửa trên findit2 (CPU)
-**Settings:** Accelerator = None, Internet = On, Add Input = dataset findit2.
+# 01 — Chia split & chọn vùng sửa trên findit2 (GPU T4 cho OCR)
+**Settings:** Accelerator = **GPU T4**, Internet = On, Add Input = dataset findit2.
+OCR chạy GPU (`paddlepaddle-gpu 3.0.0`); nếu không có GPU hoặc bản GPU lỗi thì NB1-2 tự cài bản CPU (chậm hơn nhiều, vẫn đúng kết quả).
 Mọi script chạy trong venv Python 3.10 ghim phiên bản (`/tmp/venv_ocr`) → không phụ thuộc Python/numpy của Kaggle.
 Output (`/kaggle/working/data_synth`): `splits/`, `ocr_cache/`, `manifest_*.jsonl`, `selection_stats.json`.
 Bị ngắt → *Run All* lại (OCR cache được dùng lại). Xong → **Save Version (Save & Run All)**.
 '''),
     ("code", CLONE),
     ("code", '''
-# Pinned OCR venv: paddlepaddle 3.0.0 + paddleocr 3.0.x (~3-5 min first time)
+# Pinned OCR venv: paddlepaddle-gpu 3.0.0 if a GPU is visible (else CPU build) + paddleocr 3.0.x
+# (~5-10 min first time: the GPU wheel + CUDA libs are ~3 GB). Last lines must show device=gpu.
 !bash scripts/setup_kaggle_venv.sh ocr
 PY = "/tmp/venv_ocr/bin/python"
 os.environ["PADDLE_PDX_CACHE_HOME"] = "/tmp/paddlex"
@@ -161,7 +163,7 @@ os.environ["PADDLE_PDX_CACHE_HOME"] = "/tmp/paddlex"
     ("code", '''
 !{PY} scripts/select_edit_regions.py --findit2-root auto --splits-dir /kaggle/working/data_synth/splits --ocr-test 2
 '''),
-    ("md", "## 3. OCR toàn bộ (~825 hóa đơn) & chọn vùng sửa"),
+    ("md", "## 3. OCR toàn bộ (~825 hóa đơn) & chọn vùng sửa — in `s/receipt` + ETA mỗi 25 hóa đơn; hóa đơn đã có trong `ocr_cache/` được bỏ qua"),
     ("code", '''
 !{PY} scripts/select_edit_regions.py --findit2-root auto \\
     --splits-dir /kaggle/working/data_synth/splits --ocr-cache /kaggle/working/data_synth/ocr_cache \\
@@ -170,7 +172,7 @@ os.environ["PADDLE_PDX_CACHE_HOME"] = "/tmp/paddlex"
     ("code", '''
 !head -c 600 /kaggle/working/data_synth/manifest_anytext.jsonl; echo; wc -l /kaggle/working/data_synth/manifest_*.jsonl
 '''),
-], gpu=False)
+], gpu=True)
 
 # ------------------------------------------------------------------ 02 LaMa (GPU)
 NB2 = build(2, [

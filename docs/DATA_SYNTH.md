@@ -29,7 +29,7 @@ Ba notebook trong [`notebooks/kaggle/`](../notebooks/kaggle/). Lên Kaggle chọ
 
 | Notebook | Accelerator | Input cần thêm | Thời gian (ước tính) | Output `/kaggle/working/data_synth/` |
 |---|---|---|---|---|
-| `01_prep_findit2` | None (CPU) | Dataset findit2 của nhóm | 30–60 phút (PaddleOCR CPU) | `splits/`, `ocr_cache/`, `manifest_*.jsonl`, `selection_stats.json` |
+| `01_prep_findit2` | GPU T4 (tự lùi về CPU) | Dataset findit2 của nhóm | ~10–20 phút GPU (CPU: vài giờ) | `splits/`, `ocr_cache/`, `manifest_*.jsonl`, `selection_stats.json` |
 | `02_lama_findit2` | GPU T4 | Dataset nhóm + **output notebook 01** | 15–30 phút | `lama/**`, `qa/lama_*` |
 | `03_anytext_findit2` | GPU T4 | Dataset nhóm + **output notebook 01** | 15 phút dựng env + 40–60 phút | `anytext/test/**`, `qa/anytext_*` |
 
