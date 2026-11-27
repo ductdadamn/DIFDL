@@ -63,6 +63,11 @@ def load_pipeline(anytext_dir, model="auto", revision="v1.1.3", fp16=True, font=
     os.chdir(anytext_dir)
     if str(anytext_dir) not in sys.path:
         sys.path.insert(0, str(anytext_dir))
+    # the CLIP dir holds the full CLIP (text+vision); AnyText only builds CLIPTextModel -> transformers prints
+    # ~400 "weights not used" names. Expected and harmless; keep the log readable.
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    from transformers.utils import logging as hf_logging
+    hf_logging.set_verbosity_error()
     from modelscope.pipelines import pipeline
 
     kw = {"model": model, "use_fp16": fp16, "use_translator": False, "font_path": str(font)}
