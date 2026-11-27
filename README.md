@@ -7,6 +7,7 @@ Tài liệu quản lý dự án:
 - [MASTER_PLAN.md](./MASTER_PLAN.md) — Kế hoạch tổng thể 8 tuần (Generator Zoo, lý thuyết Tần số Cao/Thấp `BG-SRM`, thiết kế 3A+, lộ trình 3 Squads).
 - [TIEN_DO_CONG_VIEC.csv](./TIEN_DO_CONG_VIEC.csv) — Bảng theo dõi tiến độ 32 đầu việc của 7 thành viên (nhập trực tiếp vào Google Sheets / Excel).
 - [AGENTS.md](./AGENTS.md) — Tóm tắt ngữ cảnh & quy tắc kỹ thuật tự động nạp cho các phiên làm việc AI.
+- [docs/DATA_SYNTH.md](./docs/DATA_SYNTH.md) — Quy trình sinh dữ liệu `LaMa` / `AnyText` trên `findit2` (split theo ID, manifest, Kaggle, QA).
 
 ---
 
