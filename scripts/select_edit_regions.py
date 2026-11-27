@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -33,11 +34,15 @@ DIGIT = re.compile(r"\d")
 
 
 # ----------------------------------------------------------------------------- OCR
-def ocr_paddle_factory():
+def ocr_paddle_factory(det_model="PP-OCRv5_server_det", rec_model="PP-OCRv5_mobile_rec"):
+    # Pin model names explicitly: letting paddleocr pick defaults pulled PP-OCRv6 models that the
+    # pinned paddle runtime cannot load. det = same model as src/seg_char.py.
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
     from paddleocr import PaddleOCR
 
-    ocr = PaddleOCR(lang="en", use_doc_orientation_classify=False,
-                    use_doc_unwarping=False, use_textline_orientation=False)
+    ocr = PaddleOCR(text_detection_model_name=det_model, text_recognition_model_name=rec_model,
+                    use_doc_orientation_classify=False, use_doc_unwarping=False,
+                    use_textline_orientation=False)
 
     def _get(res, key):
         try:
@@ -85,7 +90,8 @@ def build_cache(args, names_by_split):
     if todo and args.ocr_source == "cache":
         raise SystemExit(f"[ERROR] {len(todo)} receipts have no OCR cache and --ocr-source=cache")
     if todo:
-        runner = ocr_paddle_factory() if args.ocr_source == "paddle" else ocr_sroie_factory(args.sroie_box_dir)
+        runner = ocr_paddle_factory(args.det_model, args.rec_model) if args.ocr_source == "paddle" \
+            else ocr_sroie_factory(args.sroie_box_dir)
         print(f"[OCR] Running {args.ocr_source} on {len(todo)} receipts...")
     for i, (s, n) in enumerate(todo, 1):
         items = runner(args.findit2_root / s / n)
@@ -266,12 +272,29 @@ def main():
     ap.add_argument("--min-text-h", type=int, default=14, help="min text-line height (px) for AnyText")
     ap.add_argument("--mask-dilate", type=int, default=3, help="GT mask growth around OCR boxes (px)")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--det-model", default="PP-OCRv5_server_det")
+    ap.add_argument("--rec-model", default="PP-OCRv5_mobile_rec")
+    ap.add_argument("--ocr-test", type=int, default=0, metavar="N",
+                    help="smoke test: OCR the first N test receipts, print lines + timing, write nothing, exit")
     args = ap.parse_args()
     args.findit2_root = resolve_findit2_root(args.findit2_root)
     if args.ocr_source == "sroie" and args.sroie_box_dir is None:
         ap.error("--sroie-box-dir is required with --ocr-source sroie")
 
     names = load_split_lists(args.splits_dir)
+    if args.ocr_test:
+        import time
+        run = ocr_paddle_factory(args.det_model, args.rec_model) if args.ocr_source == "paddle" \
+            else ocr_sroie_factory(args.sroie_box_dir)
+        for n in names["test"][:args.ocr_test]:
+            t0 = time.time()
+            items = run(args.findit2_root / "test" / n)
+            hs = sorted(it["box"][3] - it["box"][1] for it in items)
+            print(f"{n}: {len(items)} lines in {time.time() - t0:.1f}s | median line height "
+                  f"{hs[len(hs) // 2] if hs else 0}px")
+            for it in items[:6]:
+                print("   ", it)
+        return
     build_cache(args, names)
 
     receipts = {s: [] for s in SPLITS}

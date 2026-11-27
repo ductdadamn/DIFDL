@@ -33,18 +33,21 @@ Ba notebook trong [`notebooks/kaggle/`](../notebooks/kaggle/). Lên Kaggle chọ
 | `02_lama_findit2` | GPU T4 | Dataset nhóm + **output notebook 01** | 15–30 phút | `lama/**`, `qa/lama_*` |
 | `03_anytext_findit2` | GPU T4 | Dataset nhóm + **output notebook 01** | 15 phút dựng env + 40–60 phút | `anytext/test/**`, `qa/anytext_*` |
 
+**Môi trường cô lập (quan trọng):** image Kaggle thay đổi không báo trước (11/2026 đang là Python 3.13, numpy 2, Pillow 13), và cài package không ghim phiên bản từng gây lỗi (`paddleocr` 3.7 kéo model PP-OCRv6 mà `paddle` 3.0 không đọc được). Vì vậy **mọi script đều chạy trong venv Python 3.10 ghim phiên bản** đặt ở `/tmp`, dựng bằng `uv`: `scripts/setup_kaggle_venv.sh ocr|lama` và `scripts/setup_anytext.sh`. Python của Kaggle chỉ dùng để clone repo và hiển thị ảnh. Notebook được sinh từ [`notebooks/kaggle/make_notebooks.py`](../notebooks/kaggle/make_notebooks.py): sửa file này rồi chạy lại để tạo notebook, không sửa `.ipynb` bằng tay. Các cell code có nhãn `# NBx-y` để báo lỗi theo nhãn.
+
 Cả ba notebook đều bật **Internet = On**. Notebook 01 phải **Save Version (Save & Run All)** xong trước, rồi notebook 02/03 mới thêm output của nó qua *Add Input → Your Work*. Hai notebook 02 và 03 chạy song song được.
 
 Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `--tsroie-root auto`): tìm thư mục có đủ `train.txt`, `val.txt`, `test.txt` + `train/`, và thư mục `*SROIE*` có `images/` + `masks/`. Nếu tìm thấy 0 hoặc từ 2 kết quả trở lên, script dừng và yêu cầu truyền đường dẫn cụ thể.
 
 ### Notebook 01 — chia split & chọn vùng
-- Script dừng (exit 1) nếu một receipt ID xuất hiện ở 2 split. Số kỳ vọng: 483/159/183 hóa đơn sạch và 998/255/326 ảnh T-SROIE; nếu lệch thì in WARN.
-- Có cell smoke test PaddleOCR trên 1 hóa đơn trước khi OCR toàn bộ. OCR cache được ghi dần, nên khi session bị ngắt chỉ cần *Run All* lại.
+- Bản thân file split của findit2 có ID hóa đơn trùng giữa các split (ví dụ `X51006619709` có ở cả train và val). Quy tắc xử lý: mỗi ID **thuộc về split sớm nhất** (train → val → test) và bị bỏ khỏi các split sau. Script in dòng `[CONFLICT]` và ghi vào `split_summary.json → id_conflicts`. Thêm `--strict` nếu muốn script dừng khi gặp trùng. Vì vậy số lượng có thể lệch 1–2 so với 483/159/183 (in WARN).
+- T-SROIE không có trong dataset findit2 trên Kaggle, nên khi không tìm thấy, script chỉ bỏ qua phần chia T-SROIE. Phần này **không cần cho LaMa/AnyText**, nhưng cần cho `ds_hybrid.py` và Test Set 1: upload T-SROIE lên Kaggle rồi chạy lại cell split.
+- Cell smoke test OCR (`--ocr-test 2`) in số dòng, thời gian và chiều cao chữ trung vị trước khi OCR toàn bộ. Model được ghim là `PP-OCRv5_server_det` (giống `src/seg_char.py`) và `PP-OCRv5_mobile_rec`. OCR cache được ghi dần, nên khi session bị ngắt chỉ cần *Run All* lại.
 - `selection_stats.json` → `test_small_text_rate` là tỉ lệ dòng số cao dưới 14px, quá nhỏ để AnyText viết. **Đưa con số này vào phần Limitations.**
 - Nếu có annotation SROIE task-1, có thể thay OCR bằng `--ocr-source sroie --sroie-box-dir <dir>`.
 
 ### Notebook 02 — LaMa
-- Cài `simple-lama-inpainting` với `--no-deps`, để giữ nguyên torch của Kaggle. **Không** cài `requirements.txt`.
+- Venv `/tmp/venv_lama`: torch 2.3.0+cu121 (giống env chính của dự án) và `simple-lama-inpainting==0.1.2`. File `big-lama.pt` được tải vào `/tmp/torch`.
 - Smoke test 10 mẫu → QA → xem contact sheet → chạy đủ. Mẫu đã có sẽ được bỏ qua.
 
 ### Notebook 03 — AnyText

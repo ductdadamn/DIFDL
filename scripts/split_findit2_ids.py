@@ -26,9 +26,9 @@ EXPECTED_CLEAN = {"train": 483, "val": 159, "test": 183}
 EXPECTED_TSROIE = {"train": 998, "val": 255, "test": 326}
 
 
-def all_ids(findit2_root: Path, split: str) -> set[str]:
+def read_rows(findit2_root: Path, split: str) -> list[dict]:
     with open(findit2_root / f"{split}.txt", newline="", encoding="utf-8") as f:
-        return {receipt_id(r["image"]) for r in csv.DictReader(f) if (r.get("image") or "").strip()}
+        return [r for r in csv.DictReader(f) if (r.get("image") or "").strip()]
 
 
 def main():
@@ -36,24 +36,40 @@ def main():
     ap.add_argument("--findit2-root", type=Path, default=ROOT / "findit2")
     ap.add_argument("--tsroie-root", type=Path, default=ROOT / "T-SROIE_test")
     ap.add_argument("--out", type=Path, default=ROOT / "data_synth" / "splits")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 1 if a receipt ID appears in two findit2 splits (default: keep it in the earliest split)")
     args = ap.parse_args()
     args.findit2_root = resolve_findit2_root(args.findit2_root)
     args.tsroie_root = resolve_tsroie_root(args.tsroie_root)
     args.out.mkdir(parents=True, exist_ok=True)
 
-    errors, summary = [], {"findit2_clean": {}, "findit2_stats": {}, "tsroie": {}}
+    errors, summary = [], {"findit2_clean": {}, "findit2_stats": {}, "tsroie": {}, "id_conflicts": []}
 
-    # 1. findit2 split IDs must be disjoint
-    ids = {s: all_ids(args.findit2_root, s) for s in SPLITS}
-    for i, a in enumerate(SPLITS):
-        for b in SPLITS[i + 1:]:
-            inter = ids[a] & ids[b]
-            if inter:
-                errors.append(f"findit2 {a}/{b} share {len(inter)} IDs, e.g. {sorted(inter)[:3]}")
+    # 1. Receipt IDs shared by several findit2 splits (present in the official findit2 split files).
+    #    Policy: each ID belongs to its EARLIEST split (train < val < test) and is dropped from later
+    #    splits, so every derived dataset (LaMa / AnyText / T-SROIE) stays ID-disjoint.
+    rows = {s: read_rows(args.findit2_root, s) for s in SPLITS}
+    id2split = {}
+    for s in SPLITS:
+        for r in rows[s]:
+            id2split.setdefault(receipt_id(r["image"]), s)
+    for s in SPLITS:
+        for r in rows[s]:
+            rid = receipt_id(r["image"])
+            if id2split[rid] != s:
+                summary["id_conflicts"].append({"id": rid, "kept_in": id2split[rid], "dropped_from": s,
+                                                "image": r["image"], "forged": r.get("forged")})
+    for c in summary["id_conflicts"]:
+        print(f"[CONFLICT] {c['id']}: kept in {c['kept_in']}, dropped from {c['dropped_from']} "
+              f"({c['image']}, forged={c['forged']})")
+    if summary["id_conflicts"] and args.strict:
+        errors.append(f"{len(summary['id_conflicts'])} receipt IDs appear in several splits (--strict)")
 
-    # 2. pristine lists
+    # 2. pristine lists (conflicting IDs removed from the later split)
     for s in SPLITS:
         clean, stats = read_findit2_clean(args.findit2_root, s)
+        stats["dropped_id_conflict"] = sum(1 for n in clean if id2split.get(receipt_id(n)) != s)
+        clean = [n for n in clean if id2split.get(receipt_id(n)) == s]
         (args.out / f"findit2_clean_{s}.txt").write_text("\n".join(clean) + "\n", encoding="utf-8")
         summary["findit2_clean"][s] = len(clean)
         summary["findit2_stats"][s] = stats
@@ -62,7 +78,6 @@ def main():
     ts_imgs = sorted((args.tsroie_root / "images").glob("*.jpg")) \
         if args.tsroie_root is not None and args.tsroie_root.exists() else []
     if ts_imgs:
-        id2split = {i: s for s in SPLITS for i in ids[s]}
         buckets, orphans = {s: [] for s in SPLITS}, []
         for p in ts_imgs:
             s = id2split.get(receipt_id(p.name))
@@ -74,7 +89,8 @@ def main():
         if orphans:
             errors.append(f"{len(orphans)} T-SROIE images have no findit2 ID, e.g. {orphans[:3]}")
     else:
-        print(f"[WARN] No T-SROIE images under {args.tsroie_root}/images — skipped T-SROIE split.")
+        print("[WARN] No T-SROIE images found - T-SROIE split lists not written (needed later for "
+              "ds_hybrid / Test Set 1; re-run with --tsroie-root once T-SROIE is uploaded).")
 
     (args.out / "split_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

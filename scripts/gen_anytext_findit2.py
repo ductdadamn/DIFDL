@@ -83,7 +83,7 @@ def make_backend(args):
             raise RuntimeError(f"AnyText failed (code={code}): {warn}")
         ai = np.asarray(results[0])[..., :3].astype(np.uint8)
         if ai.shape[:2] != (h, w):  # AnyText works on multiples of 64; 512 should round-trip
-            ai = np.array(Image.fromarray(ai).resize((w, h), Image.BICUBIC))
+            ai = np.array(Image.fromarray(ai).resize((w, h), Image.Resampling.BICUBIC))
         return ai
 
     return run
