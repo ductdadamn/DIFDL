@@ -110,15 +110,19 @@ os.environ["TORCH_HOME"] = "/tmp/torch"
 !bash scripts/setup_kaggle_venv.sh lama
 !/tmp/venv_lama/bin/python scripts/kaggle_doctor.py --stage lama
 '''),
-    ("md", "## 4. Env AnyText (~10–15 phút) + import"),
+    ("md", "## 4. Env AnyText (~10–15 phút) + tải trọng số (~5–6GB) + kiểm tra"),
     ("code", '''
 !bash scripts/setup_anytext.sh 2>&1 | tail -n 5
 '''),
     ("code", FONT),
+    ("code", """
+# Weights + ms_wrapper.py (~5-6GB) with a CURRENT modelscope client (1.10 can't download from today's hub)
+!bash scripts/download_anytext_model.sh /tmp/anytext_model
+"""),
     ("code", '''
 !{PY} scripts/kaggle_doctor.py --stage anytext
 '''),
-    ("md", "## 5. (Tùy chọn, ~10 phút + 5–6GB) Tải trọng số AnyText và thử sửa 1 ảnh — kiểm tra luôn chiều `draw_pos`"),
+    ("md", "## 5. Load AnyText và thử sửa 1 ảnh — kiểm tra luôn chiều `draw_pos` (inside >> outside)"),
     ("code", '''
 !{PY} scripts/kaggle_doctor.py --stage anytext --full
 '''),
@@ -204,7 +208,7 @@ NB3 = build(3, [
     ("md", '''
 # 03 — Sinh AnyText Replacement + Insertion (Unseen Test Set 2) (GPU T4)
 **Settings:** Accelerator = GPU T4, Internet = On. Add Input: dataset findit2 + output notebook **01_prep_findit2**.
-Venv ghim `/tmp/DIFDL/.venv_anytext` (torch 2.1.2, modelscope 1.10); trọng số (~5–6GB) cache ở `/tmp/ms`.
+Venv ghim `/tmp/DIFDL/.venv_anytext` (theo `environment.yaml` của AnyText: torch 2.0.1, modelscope 1.10); trọng số (~5–6GB) tải vào `/tmp/anytext_model`.
 Output: `/kaggle/working/data_synth/anytext/test/{images,masks,pristine,raw}/` + `qa/`.
 '''),
     ("code", CLONE),
@@ -213,6 +217,10 @@ Output: `/kaggle/working/data_synth/anytext/test/{images,masks,pristine,raw}/` +
 !bash scripts/setup_anytext.sh 2>&1 | tail -n 5
 '''),
     ("code", FONT),
+    ("code", """
+# Weights + ms_wrapper.py (~5-6GB) with a CURRENT modelscope client (1.10 can't download from today's hub)
+!bash scripts/download_anytext_model.sh /tmp/anytext_model
+"""),
     ("code", FIND_PREP.format(gen="anytext")),
     ("md", '''
 ## 2. Smoke test 5 mẫu

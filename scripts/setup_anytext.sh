@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AnyText Isolated Environment Setup (Server Lab / High-VRAM GPU)
+# AnyText isolated environment (Kaggle T4 / Lab Server), inference only.
 #
-# Why isolated (.venv_anytext)?
-#   AnyText (github.com/tyxsspa/AnyText) pins legacy albumentations==0.4.3,
-#   pytorch-lightning==1.5.0, transformers==4.19.2, and timm==0.6.12 which
-#   conflict with ADCD-Net's albumentations==2.0.8 & PyTorch 2.3.0.
-#   Keeping AnyText in .venv_anytext prevents breaking the main .venv.
+# Versions follow AnyText's own environment.yaml (torch 2.0.1, transformers 4.30.2,
+# open_clip 2.7.0, torchmetrics 0.11.4, modelscope 1.10.0, ...) minus demo/translator-only
+# packages (gradio, streamlit, tensorflow). Every transitive dependency is resolved as of
+# ANYTEXT_EXCLUDE_NEWER, the AnyText v1.1 release era (see docs/KAGGLE_RUN_LOG.md #3, #4).
+# The AnyText repo is pinned to a commit. Model weights are downloaded separately by
+# scripts/download_anytext_model.sh (modelscope 1.10 cannot download from today's hub).
 #
 # Usage:
-#   bash scripts/setup_anytext.sh              # Default: cu121
-#   bash scripts/setup_anytext.sh --cuda cu118 # For older Lab Server drivers
+#   bash scripts/setup_anytext.sh               # default cu118 (torch 2.0.1 has no cu121 wheels)
+#   bash scripts/setup_anytext.sh --cuda cu117
+# Idempotent: skipped if ${VENV_DIR}/.ok matches the current snapshot + commit.
 # ==============================================================================
 set -euo pipefail
 
@@ -18,7 +20,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANYTEXT_DIR="${REPO_ROOT}/third_party/AnyText"
 VENV_DIR="${REPO_ROOT}/.venv_anytext"
-CUDA_TAG="cu121"
+CUDA_TAG="cu118"
+ANYTEXT_COMMIT="${ANYTEXT_COMMIT:-3d4a260}"                       # tyxsspa/AnyText HEAD on 2025-03-07
+ANYTEXT_EXCLUDE_NEWER="${ANYTEXT_EXCLUDE_NEWER:-2024-01-15T00:00:00Z}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,57 +30,57 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+STAMP="snapshot=${ANYTEXT_EXCLUDE_NEWER} commit=${ANYTEXT_COMMIT} cuda=${CUDA_TAG}"
 
 export PATH="${HOME}/.local/bin:${PATH}"
-export UV_HTTP_TIMEOUT=300
-export UV_HTTP_RETRIES=5
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv_cache}" UV_HTTP_TIMEOUT=300 UV_HTTP_RETRIES=5
 unset UV_SYSTEM_PYTHON  # Kaggle sets it; it only produces warnings for `uv venv`
-# Resolve every *transitive* dependency as of this date (AnyText v1.1.3 era). Exact pins alone are not
-# enough: unpinned sub-dependencies float to today's versions (see docs/KAGGLE_RUN_LOG.md, entry 3).
-ANYTEXT_EXCLUDE_NEWER="${ANYTEXT_EXCLUDE_NEWER:-2024-08-01T00:00:00Z}"
+
+if [ -f "${VENV_DIR}/.ok" ] && grep -qF "${STAMP}" "${VENV_DIR}/.ok"; then
+    echo "[OK] AnyText env already set up"; cat "${VENV_DIR}/.ok"; exit 0
+fi
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "[INFO] Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="${HOME}/.local/bin:${PATH}"
+    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
 fi
 
-echo "[INFO] Cloning AnyText into ${ANYTEXT_DIR} (if not already present)..."
+echo "[INFO] AnyText repo @ ${ANYTEXT_COMMIT} -> ${ANYTEXT_DIR}"
 mkdir -p "${REPO_ROOT}/third_party"
-if [ ! -d "${ANYTEXT_DIR}" ]; then
-    git clone https://github.com/tyxsspa/AnyText.git "${ANYTEXT_DIR}"
-fi
+[ -d "${ANYTEXT_DIR}/.git" ] || git clone -q https://github.com/tyxsspa/AnyText.git "${ANYTEXT_DIR}"
+git -C "${ANYTEXT_DIR}" checkout -q "${ANYTEXT_COMMIT}"
 
-echo "[INFO] Creating isolated Python 3.10 venv at ${VENV_DIR}..."
-uv python install 3.10
-uv venv --clear "${VENV_DIR}" --python 3.10 --seed
+echo "[INFO] Python 3.10 venv -> ${VENV_DIR}"
+uv python install 3.10 >/dev/null
+uv venv --clear "${VENV_DIR}" --python 3.10 --seed >/dev/null
+PY="${VENV_DIR}/bin/python"
+UVI=(uv pip install --python "${PY}" -q)
 
-echo "[INFO] Installing AnyText PyTorch (${CUDA_TAG}) & dependencies..."
-uv pip install --python "${VENV_DIR}/bin/python" "setuptools<70" wheel "Cython<3.0"
+echo "[INFO] torch 2.0.1+${CUDA_TAG} (PyTorch index, no snapshot: it may not publish upload times)"
+"${UVI[@]}" --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}" \
+    "torch==2.0.1+${CUDA_TAG}" "torchvision==0.15.2+${CUDA_TAG}"
 
-# torch first, without --exclude-newer (the PyTorch index may not publish upload times)
-uv pip install --python "${VENV_DIR}/bin/python" \
-    --extra-index-url "https://download.pytorch.org/whl/${CUDA_TAG}" \
-    "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}"
+echo "[INFO] AnyText deps (environment.yaml pins, snapshot ${ANYTEXT_EXCLUDE_NEWER})"
+"${UVI[@]}" --exclude-newer "${ANYTEXT_EXCLUDE_NEWER}" \
+    "torch==2.0.1+${CUDA_TAG}" "torchvision==0.15.2+${CUDA_TAG}" \
+    "setuptools<70" "numpy==1.23.5" "Pillow==9.5.0" "opencv-python-headless==4.7.0.72" \
+    "pytorch-lightning==1.5.0" "torchmetrics==0.11.4" "omegaconf==2.2.3" "einops==0.4.1" \
+    "transformers==4.30.2" "kornia==0.6.7" "open_clip_torch==2.7.0" "timm==0.6.7" \
+    "addict==2.4.0" "safetensors==0.4.0" "modelscope==1.10.0" "easydict==1.10" \
+    "diffusers==0.10.2" "imageio==2.9.0" "jieba==0.42.1" "sentencepiece==0.1.99" \
+    "ujson" "fsspec" "tqdm" "scipy" "simplejson" "sortedcontainers" "datasets" "oss2"
 
-# everything else from PyPI, frozen at ANYTEXT_EXCLUDE_NEWER (already-installed torch satisfies its pins)
-uv pip install --python "${VENV_DIR}/bin/python" --no-build-isolation \
-    --exclude-newer "${ANYTEXT_EXCLUDE_NEWER}" \
-    "setuptools<70" \
-    "torch==2.1.2+${CUDA_TAG}" "torchvision==0.16.2+${CUDA_TAG}" \
-    "numpy==1.23.5" "scipy==1.10.1" "Pillow==9.5.0" \
-    "albumentations==1.3.1" "opencv-python-headless==4.8.1.78" \
-    "pytorch-lightning==1.5.0" "torchmetrics==0.6.0" "pyDeprecate==0.3.1" \
-    "omegaconf==2.1.1" "einops==0.3.0" "kornia==0.6.0" \
-    "huggingface-hub==0.23.5" "transformers==4.30.2" "diffusers==0.10.2" "safetensors" \
-    "timm==0.6.12" "open-clip-torch==2.0.2" \
-    "easydict==1.10" "addict==2.4.0" "datasets==2.18.0" "modelscope==1.10.0" \
-    "simplejson" "sortedcontainers" "tqdm" "freetype-py"
+# xformers is optional (speed only); never fail the setup because of it
+"${UVI[@]}" --exclude-newer "${ANYTEXT_EXCLUDE_NEWER}" "xformers==0.0.20" \
+    || echo "[WARN] xformers not installed (optional)"
 
 echo "[INFO] Verifying AnyText venv..."
-"${VENV_DIR}/bin/python" -c "
-import torch, albumentations, pytorch_lightning, transformers, modelscope
-print('PyTorch:', torch.__version__, '| CUDA:', torch.cuda.is_available(), '| GPUs:', torch.cuda.device_count())
-print('albumentations:', albumentations.__version__, '| lightning:', pytorch_lightning.__version__)
-"
-echo "[DONE] AnyText isolated env ready at ${VENV_DIR}"
+OKTXT="$("${PY}" -c "
+import torch, pytorch_lightning, transformers, modelscope, open_clip, diffusers, cv2, numpy
+print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| lightning', pytorch_lightning.__version__,
+      '| transformers', transformers.__version__, '| modelscope', modelscope.__version__,
+      '| open_clip', open_clip.__version__, '| numpy', numpy.__version__)
+")"
+printf '%s\n%s\n' "${OKTXT}" "${STAMP}" > "${VENV_DIR}/.ok"
+"${PY}" -m pip freeze > "${VENV_DIR}/freeze.txt" 2>/dev/null || true
+cat "${VENV_DIR}/.ok"
+echo "[DONE] AnyText env ready at ${VENV_DIR} (weights: bash scripts/download_anytext_model.sh)"

@@ -53,7 +53,8 @@ Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `
 - Smoke test 10 mẫu → QA → xem contact sheet → chạy đủ. Mẫu đã có sẽ được bỏ qua.
 
 ### Notebook 03 — AnyText
-- `scripts/setup_anytext.sh` dựng venv riêng (torch 2.1.2, modelscope 1.10) tại `/tmp/DIFDL/.venv_anytext`. Trọng số (~5–6GB) cache ở `/tmp/ms`, không tốn dung lượng 20GB của `/kaggle/working`.
+- `scripts/setup_anytext.sh` dựng venv theo `environment.yaml` của AnyText (torch 2.0.1, modelscope 1.10, repo ghim ở commit `3d4a260`) tại `/tmp/DIFDL/.venv_anytext`.
+- `scripts/download_anytext_model.sh` tải trọng số (~5–6GB) vào `/tmp/anytext_model` bằng client modelscope mới, vì 1.10 không tải được từ server hiện tại. Nhờ vậy không tốn dung lượng 20GB của `/kaggle/working`.
 - Font: AnyText cần một file TTF tại `font/Arial_Unicode.ttf`. Notebook copy `DejaVuSans.ttf` của matplotlib sang tên đó, đủ cho chữ Latin và số.
 - **Kiểm tra bằng mắt sau smoke test 5 mẫu** (contact sheet + thư mục `raw/`):
   - Chữ mới phải nằm **đúng trong box**. Nếu AnyText vẽ chữ chỗ khác hoặc vẽ lại cả mảnh, nghĩa là ảnh vị trí bị đảo màu: xóa `data_synth/anytext` rồi chạy lại với `--draw-pos-format file`.

@@ -9,7 +9,7 @@ Each stage runs a list of independent checks (one failure never stops the others
   /tmp/venv_ocr/bin/python  scripts/kaggle_doctor.py --stage ocr       # PaddleOCR on 1 real receipt
   /tmp/venv_lama/bin/python scripts/kaggle_doctor.py --stage lama      # LaMa on GPU, 1 synthetic inpaint
   /tmp/DIFDL/.venv_anytext/bin/python scripts/kaggle_doctor.py --stage anytext [--full]
-        (--full also downloads the ~5-6GB weights and runs 1 edit)
+        (--full loads the weights from scripts/download_anytext_model.sh and runs 1 edit)
 Stdlib-only at import time; runs on Python 3.10-3.13.
 """
 
@@ -181,32 +181,33 @@ def stage_anytext(args):
     check("anytext_repo", lambda: f"{ad} @ " + sh(f"git -C '{ad}' log -1 --format='%h %cs %s'"))
     check("font", lambda: f"{(ad / 'font' / 'Arial_Unicode.ttf').stat().st_size} bytes")
 
-    def imp():
-        os.chdir(ad)
-        sys.path.insert(0, str(ad))
-        import ms_wrapper  # noqa: F401
-        from modelscope.pipelines import pipeline  # noqa: F401
-        return "ms_wrapper + modelscope.pipelines import OK"
-    check("import AnyText ms_wrapper", imp)
+    check("import modelscope.pipelines", lambda: (__import__("modelscope.pipelines"), "OK")[1])
+
+    def model_dir():
+        from anytext_loader import resolve_model
+        model, is_local = resolve_model(args.model)
+        if not is_local:
+            raise RuntimeError(f"no local model dir (got hub id {model}); run scripts/download_anytext_model.sh")
+        done = Path(model) / ".done"
+        return f"{model} | " + (json.loads(done.read_text())["model_id"] if done.exists() else "no .done")
+    check("model dir (ms_wrapper.py + configuration.json)", model_dir)
     if not args.full:
-        print("(skip pipeline load: pass --full to download ~5-6GB weights and run 1 edit)")
+        print("(skip pipeline load: pass --full to load the downloaded weights and run 1 edit)")
         return
 
     state = {}
 
     def load():
-        from modelscope.pipelines import pipeline
-        kw = dict(model="damo/cv_anytext_text_generation_editing", model_revision="v1.1.3")
-        try:
-            state["pipe"] = pipeline("my-anytext-task", use_fp16=True, use_translator=False, **kw)
-            return "use_fp16/use_translator kwargs accepted"
-        except TypeError:
-            state["pipe"] = pipeline("my-anytext-task", **kw)
-            return "fallback: pipeline without use_fp16/use_translator"
+        from anytext_loader import load_pipeline
+        t0 = time.time()
+        state["pipe"] = load_pipeline(ad, model=args.model)
+        return f"loaded in {time.time() - t0:.0f}s"
     check("AnyText pipeline load", load)
 
     def edit():
         import numpy as np
+        if "pipe" not in state:
+            raise RuntimeError("skipped: pipeline did not load (see previous FAIL)")
         img = np.full((512, 512, 3), 235, np.uint8)
         pos = np.zeros((512, 512, 3), np.uint8)
         pos[200:240, 150:330] = 255
@@ -229,6 +230,7 @@ def main():
     ap.add_argument("--rec-model", default="PP-OCRv5_mobile_rec")
     ap.add_argument("--anytext-dir", default="/tmp/DIFDL/third_party/AnyText")
     ap.add_argument("--full", action="store_true")
+    ap.add_argument("--model", default="auto", help="AnyText model: auto (/tmp/anytext_model) | dir | hub id")
     ap.add_argument("--out", default="/kaggle/working/doctor")
     args = ap.parse_args()
 

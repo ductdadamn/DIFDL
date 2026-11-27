@@ -12,15 +12,14 @@ Run inside the isolated AnyText env (scripts/setup_anytext.sh) from any cwd:
   python scripts/gen_anytext_findit2.py --anytext-dir third_party/AnyText \
       --findit2-root /kaggle/input/<ds>/findit2 --manifest /kaggle/input/<ds>/manifest_anytext.jsonl \
       --out /kaggle/working/data_synth --limit 5
-  Needs third_party/AnyText/font/Arial_Unicode.ttf (not shipped with the AnyText repo).
+  Needs: scripts/setup_anytext.sh, scripts/download_anytext_model.sh (weights -> /tmp/anytext_model)
+  and any TTF at third_party/AnyText/font/Arial_Unicode.ttf (the notebook copies DejaVuSans).
 CPU dry run (no AnyText; draws text with PIL to test blending/I/O):  --backend dummy
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 import time
 from pathlib import Path
 
@@ -44,23 +43,9 @@ def make_backend(args):
             return np.array(im)
         return run
 
-    anytext_dir = args.anytext_dir.resolve()
-    font = anytext_dir / "font" / "Arial_Unicode.ttf"
-    if not font.exists():
-        raise SystemExit(f"[ERROR] Missing {font}. Download Arial_Unicode.ttf into {font.parent}/ first.")
-    os.chdir(anytext_dir)  # AnyText resolves ./font, ./models_yaml etc. relative to its repo root
-    sys.path.insert(0, str(anytext_dir))
-    from modelscope.pipelines import pipeline
-    try:
-        import ms_wrapper  # noqa: F401  (AnyText repo module that registers 'my-anytext-task')
-    except ImportError as exc:
-        print(f"[WARN] could not import AnyText ms_wrapper ({exc}); relying on ModelScope remote code")
+    from anytext_loader import load_pipeline  # chdirs into the AnyText repo (its code expects that)
 
-    kw =dict(model=args.model, model_revision=args.model_revision)
-    try:
-        pipe = pipeline("my-anytext-task", use_fp16=not args.fp32, use_translator=False, **kw)
-    except TypeError:
-        pipe = pipeline("my-anytext-task", **kw)
+    pipe = load_pipeline(args.anytext_dir, model=args.model, revision=args.model_revision, fp16=not args.fp32)
     params = {"show_debug": False, "image_count": 1, "ddim_steps": args.ddim_steps,
               "cfg_scale": args.cfg_scale, "strength": 1.0}
 
@@ -96,8 +81,9 @@ def main():
     ap.add_argument("--out", type=Path, default=ROOT / "data_synth")
     ap.add_argument("--backend", choices=["anytext", "dummy"], default="anytext")
     ap.add_argument("--anytext-dir", type=Path, default=ROOT / "third_party" / "AnyText")
-    ap.add_argument("--model", default="damo/cv_anytext_text_generation_editing",
-                    help="ModelScope id or local dir with downloaded weights (e.g. a Kaggle dataset)")
+    ap.add_argument("--model", default="auto",
+                    help="'auto' = /tmp/anytext_model if downloaded (scripts/download_anytext_model.sh), "
+                         "else the ModelScope hub id; or any local model dir")
     ap.add_argument("--model-revision", default="v1.1.3")
     ap.add_argument("--prompt", default='a scanned thermal paper receipt with black printed text "{text}"')
     ap.add_argument("--ddim-steps", type=int, default=20)

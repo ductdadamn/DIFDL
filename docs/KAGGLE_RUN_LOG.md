@@ -47,13 +47,31 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 - **Phát hiện kèm (vô hại):** `uv venv` cảnh báo `--system flag has no effect` vì Kaggle đặt sẵn `UV_SYSTEM_PYTHON`. Các script giờ `unset` biến này.
 - **Bài học:** checklist mục 3. Thêm `00_doctor` + `scripts/kaggle_doctor.py` để phát hiện loại lỗi này **trước** khi chạy notebook thật, đúng như đề xuất của Thiết: tách cell chẩn đoán ra để không phải viết lại notebook nhiều lần.
 
+## #4 — NB0-8 (doctor `anytext --full`), run 1 (27/11/2026): `FileDownloadError: File README.md download incomplete, content_length: None`
+- **Triệu chứng:** load pipeline AnyText thất bại ngay khi tải file đầu tiên của model. Check sau đó báo `KeyError: 'pipe'`, nhưng đó chỉ là hệ quả.
+- **Nguyên nhân gốc:**
+  - `modelscope==1.10.0` (11/2023) là bản AnyText bắt buộc để **chạy** model, nhưng client này không còn tương thích với **server** ModelScope hiện nay: server không gửi header `content-length` nữa.
+  - Đây là loại lỗi mà khóa theo ngày không chặn được, vì bên kia là một dịch vụ đang chạy, không phải package.
+- **Cách sửa (commit này):**
+  - `scripts/download_anytext_model.sh` tải trọng số bằng **client modelscope mới** trong venv riêng `/tmp/venv_msdl` (thử `damo/…` rồi `iic/…`, revision `v1.1.3` rồi mặc định) vào `/tmp/anytext_model`, và kiểm tra có `ms_wrapper.py` + `configuration.json`.
+  - modelscope 1.10 chỉ còn **load từ thư mục local**, thông qua `scripts/anytext_loader.py`, module dùng chung cho script sinh dữ liệu và doctor.
+- **Phát hiện kèm:** `setup_anytext.sh` cũ ghim các phiên bản **khác** với `environment.yaml` chính thức của AnyText (torch 2.1.2 thay vì 2.0.1, open_clip 2.0.2 thay vì 2.7.0, torchmetrics 0.6.0 thay vì 0.11.4…). Đã căn lại theo bản chính thức, khóa ngày 2024-01-15, ghim repo ở commit `3d4a260`, và bỏ các package chỉ dùng cho demo/translator.
+- **Bài học:**
+  - Khi tích hợp một repo bên ngoài, **đọc file environment/inference của chính repo đó** trước khi tự ghim phiên bản.
+  - Tách bước *tải* (dùng client mới) khỏi bước *chạy* (dùng runtime cũ đã ghim).
+
+## #5 — NB0-7 (doctor `anytext`), run 1 (27/11/2026): `ModuleNotFoundError: No module named 'ms_wrapper'` — lỗi của chính doctor
+- **Nguyên nhân gốc:** check doctor (và `gen_anytext_findit2.py`) giả định `ms_wrapper.py` nằm trong repo GitHub của AnyText. Thực tế file này nằm trong **repo model** trên ModelScope và chỉ có sau khi tải trọng số. Môi trường không có lỗi gì.
+- **Cách sửa (commit này):** thay bằng check "thư mục model có đủ `ms_wrapper.py` + `configuration.json`", và bỏ đoạn import sai trong script sinh dữ liệu.
+- **Bài học:** check chẩn đoán cũng là code và cũng cần kiểm chứng. Một FAIL có thể là do giả định của check sai, không nhất thiết là môi trường lỗi.
+
 ---
 
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
 | Rủi ro | Doctor check phát hiện | Phương án nếu FAIL |
 |---|---|---|
 | Ngày snapshot OCR chưa đúng (paddleocr 3.0.x / paddlex 3.0.x chưa có hoặc đã quá) | `ocr: versions`, `declared_deps`, `PaddleOCR init` | Đổi `OCR_EXCLUDE_NEWER=<ngày>` rồi chạy lại cell, không cần sửa code |
+| Server ModelScope đổi hành vi lần nữa (client mới cũng hỏng) | `download_anytext_model.sh` | Tải từ mirror HuggingFace hoặc upload trọng số thành Kaggle Dataset rồi `--model <dir>` |
 | `uv` không resolve được torch khi có snapshot (lỗi "no version of torch") | build venv lama / anytext | Bỏ torch khỏi lệnh cài thứ hai trong script setup |
-| Repo AnyText (HEAD) thay đổi | `anytext: anytext_repo` (in commit + ngày) | Ghim commit trong `setup_anytext.sh` |
 | Chiều của `draw_pos` (trắng/đen) | `anytext --full: text-editing` (so diff trong box với ngoài box) | `--draw-pos-format file` |
 | OCR CPU quá chậm (>8 s/hóa đơn) | `ocr: PaddleOCR predict` (thời gian) | Đổi det sang `PP-OCRv5_mobile_det` |
