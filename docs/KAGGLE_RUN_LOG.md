@@ -100,13 +100,33 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
   - Smoke test phải gồm **ca biên của dữ liệu** (ảnh lớn nhất), không chỉ N mẫu đầu.
   - Vòng lặp sinh dữ liệu dài phải chịu lỗi từng mẫu, không được để một mẫu làm chết cả lần chạy.
 
+## #9 — NB0-8/NB0-9 (doctor AnyText), run 2 (27/11/2026): không có model dir + `HTTPError 操作过于频繁，请稍后再试!`
+- **Triệu chứng:**
+  - `model dir` FAIL ("got hub id"): script tải không tạo được `/tmp/anytext_model`.
+  - `pipeline load` FAIL với mã 10013201001, nghĩa là ModelScope báo "thao tác quá thường xuyên, thử lại sau".
+- **Nguyên nhân gốc:**
+  1. ModelScope **giới hạn tần suất tải** với khách ẩn danh, mà IP của Kaggle dùng chung nên càng dễ bị chặn.
+  2. Repo ModelScope nặng **~15 GB**, chứ không phải 5–6 GB như mình ước: 7.9 GB trong đó là model dịch zh→en, không dùng tới vì `use_translator=False`. Tải toàn bộ vừa lâu vừa sinh ra rất nhiều request.
+  3. Ở chế độ `auto`, loader **lặng lẽ chuyển sang hub** khi không có thư mục local. Vì vậy lỗi gốc (tải thất bại) bị che bởi một lỗi thứ cấp (bị chặn tần suất). Đây là lỗi thiết kế của mình.
+- **Cách sửa (commit này):**
+  - `download_anytext_model.sh` thử theo thứ tự:
+    1. Dùng bản đã có trong `/tmp/anytext_model` hoặc **dưới `/kaggle/input`**.
+    2. ModelScope `v1.1.3`, **bỏ qua** `nlp_csanmt_translation_zh2en/` và `description/`, thử 3 lần với thời gian chờ tăng dần 0 / 60 / 180 s.
+    3. Mirror HuggingFace `camenduru/anytext`, ghim theo commit, chỉ tải ckpt + clip + wrapper, rồi kiểm tra sha256 của ckpt. `ms_wrapper.py` lấy từ ModelScope v1.1.3 nếu tải được hai file nhỏ này, nếu không thì dùng bản cũ hơn có sẵn trên mirror.
+  - `anytext_loader.resolve_model('auto')` không bao giờ chuyển sang hub nữa: không có model thì báo lỗi ngay, nói rõ cần chạy gì. Model dir được coi là đủ khi có cả ckpt và clip.
+- **Bài học:**
+  - Ngoài phiên bản client, dịch vụ bên ngoài còn có thể **chặn tần suất**, nên luôn cần nguồn dự phòng và cách lưu lại (Kaggle Dataset) để không phải tải lại.
+  - **Không lặng lẽ chuyển sang phương án khác** khi bước trước đã lỗi, vì như vậy lỗi gốc sẽ bị che mất.
+  - Kiểm tra kích thước repo trước khi ước lượng thời gian và dung lượng ổ đĩa.
+
 ---
 
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
 | Rủi ro | Doctor check phát hiện | Phương án nếu FAIL |
 |---|---|---|
 | Ngày snapshot OCR chưa đúng (paddleocr 3.0.x / paddlex 3.0.x chưa có hoặc đã quá) | `ocr: versions`, `declared_deps`, `PaddleOCR init` | Đổi `OCR_EXCLUDE_NEWER=<ngày>` rồi chạy lại cell, không cần sửa code |
-| Server ModelScope đổi hành vi lần nữa (client mới cũng hỏng) | `download_anytext_model.sh` | Tải từ mirror HuggingFace hoặc upload trọng số thành Kaggle Dataset rồi `--model <dir>` |
+| Cả ModelScope lẫn mirror HF đều hỏng/chặn | `download_anytext_model.sh` in `[FAIL]` | Tải 1 lần ở session nào được, upload thư mục model thành Kaggle Dataset private → Add Input; `auto` tự tìm |
+| `ms_wrapper.py` bản mirror HF (cũ hơn) không nhận `font_path`/`text-editing` | doctor `anytext --full` | Chạy lại lúc ModelScope hết chặn để lấy wrapper v1.1.3 (`ANYTEXT_SOURCE=modelscope`) |
 | `uv` không resolve được torch khi có snapshot (lỗi "no version of torch") | build venv lama / anytext | Bỏ torch khỏi lệnh cài thứ hai trong script setup |
 | Chiều của `draw_pos` (trắng/đen) | `anytext --full: text-editing` (so diff trong box với ngoài box) | `--draw-pos-format file` |
 | `paddlepaddle-gpu` không cài/chạy được (index Paddle chậm/không vào được, lệch cuDNN) | NB1-2 in `[WARN] ... falling back to CPU`; doctor `net paddle_gpu_index`, `paddle_device` | Tự lùi về CPU; nếu CPU vẫn chậm, thêm `--det-model PP-OCRv5_mobile_det` vào NB1-5 |

@@ -110,13 +110,14 @@ os.environ["TORCH_HOME"] = "/tmp/torch"
 !bash scripts/setup_kaggle_venv.sh lama
 !/tmp/venv_lama/bin/python scripts/kaggle_doctor.py --stage lama
 '''),
-    ("md", "## 4. Env AnyText (~10–15 phút) + tải trọng số (~5–6GB) + kiểm tra"),
+    ("md", "## 4. Env AnyText (~10–15 phút) + tải trọng số (~7.5GB) + kiểm tra"),
     ("code", '''
 !bash scripts/setup_anytext.sh 2>&1 | tail -n 5
 '''),
     ("code", FONT),
     ("code", """
-# Weights + ms_wrapper.py (~5-6GB) with a CURRENT modelscope client (1.10 can't download from today's hub)
+# Weights + ms_wrapper.py (~7.5GB): ModelScope (retry/back-off) -> HuggingFace mirror fallback. Skipped if a
+# complete copy is already in /tmp/anytext_model or under /kaggle/input (e.g. a private Dataset of the model dir).
 !bash scripts/download_anytext_model.sh /tmp/anytext_model
 """),
     ("code", '''
@@ -210,7 +211,7 @@ NB3 = build(3, [
     ("md", '''
 # 03 — Sinh AnyText Replacement + Insertion (Unseen Test Set 2) (GPU T4)
 **Settings:** Accelerator = GPU T4, Internet = On. Add Input: dataset findit2 + output notebook **01_prep_findit2**.
-Venv ghim `/tmp/DIFDL/.venv_anytext` (theo `environment.yaml` của AnyText: torch 2.0.1, modelscope 1.10); trọng số (~5–6GB) tải vào `/tmp/anytext_model`.
+Venv ghim `/tmp/DIFDL/.venv_anytext` (theo `environment.yaml` của AnyText: torch 2.0.1, modelscope 1.10); trọng số (~7.5GB) tải vào `/tmp/anytext_model`.
 Output: `/kaggle/working/data_synth/anytext/test/{images,masks,pristine,raw}/` + `qa/`.
 '''),
     ("code", CLONE),
@@ -220,7 +221,8 @@ Output: `/kaggle/working/data_synth/anytext/test/{images,masks,pristine,raw}/` +
 '''),
     ("code", FONT),
     ("code", """
-# Weights + ms_wrapper.py (~5-6GB) with a CURRENT modelscope client (1.10 can't download from today's hub)
+# Weights + ms_wrapper.py (~7.5GB): ModelScope (retry/back-off) -> HuggingFace mirror fallback. Skipped if a
+# complete copy is already in /tmp/anytext_model or under /kaggle/input (e.g. a private Dataset of the model dir).
 !bash scripts/download_anytext_model.sh /tmp/anytext_model
 """),
     ("code", FIND_PREP.format(gen="anytext")),

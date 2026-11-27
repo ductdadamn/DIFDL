@@ -2,7 +2,8 @@
 
 Facts this relies on (checked against tyxsspa/AnyText @ 3d4a260):
   - `ms_wrapper.py` / `configuration.json` live in the ModelScope MODEL repo, not in the GitHub repo;
-    they come with the weights (scripts/download_anytext_model.sh -> /tmp/anytext_model).
+    they come with the weights (scripts/download_anytext_model.sh -> /tmp/anytext_model,
+    or a complete copy under /kaggle/input). 'auto' never falls back to the hub.
   - The wrapper imports the GitHub repo's code (cldm/, ldm/, util.py, ...), so cwd + sys.path must be the repo.
   - demo.py passes model, model_revision, use_fp16, use_translator, font_path (+ optional model_path).
 """
@@ -15,12 +16,34 @@ from pathlib import Path
 
 HUB_ID = "damo/cv_anytext_text_generation_editing"
 DEFAULT_LOCAL = Path("/tmp/anytext_model")
+REQUIRED = ("configuration.json", "ms_wrapper.py", "anytext_v1.1.ckpt", "clip-vit-large-patch14/pytorch_model.bin")
+
+
+def is_complete(d: Path) -> bool:
+    return all((d / f).exists() for f in REQUIRED)
+
+
+def find_kaggle_input_copy(root: Path = Path("/kaggle/input"), max_depth: int = 6):
+    """A model dir uploaded as a Kaggle Dataset / notebook output (no download needed)."""
+    if not root.exists():
+        return None
+    for p in sorted(root.rglob("ms_wrapper.py")):
+        if len(p.relative_to(root).parts) <= max_depth and is_complete(p.parent):
+            return p.parent
+    return None
 
 
 def resolve_model(model: str) -> tuple[str, bool]:
-    """'auto' -> local download dir if complete, else the hub id. Returns (model, is_local)."""
+    """'auto' -> /tmp/anytext_model if complete, else a complete copy under /kaggle/input, else ERROR.
+    (No silent fallback to the hub: modelscope 1.10 cannot download from today's hub and the hub
+    rate-limits Kaggle IPs -> confusing secondary errors, KAGGLE_RUN_LOG #9.) Returns (model, is_local)."""
     if model == "auto":
-        model = str(DEFAULT_LOCAL) if (DEFAULT_LOCAL / "ms_wrapper.py").exists() else HUB_ID
+        found = DEFAULT_LOCAL if is_complete(DEFAULT_LOCAL) else find_kaggle_input_copy()
+        if found is None:
+            raise FileNotFoundError(
+                f"no complete AnyText model dir ({', '.join(REQUIRED)}) in {DEFAULT_LOCAL} or /kaggle/input; "
+                f"run scripts/download_anytext_model.sh (or pass --model <dir> / the hub id explicitly)")
+        model = str(found)
     p = Path(model)
     if p.exists():
         missing = [f for f in ("configuration.json", "ms_wrapper.py") if not (p / f).exists()]
