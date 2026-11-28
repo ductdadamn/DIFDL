@@ -222,6 +222,26 @@ def stage_anytext(args):
 
     state = {}
 
+    # Read-only check (KAGGLE_RUN_LOG #12): a model dir under /kaggle/input is read-only. Two pieces of evidence:
+    #  - is the dir writable at all? (probe file). Not writable + load/edit PASS => proven on read-only.
+    #  - audit: list (size, mtime) of every file before load and after the edit; any new/changed file means
+    #    modelscope/AnyText writes into the model dir => would crash on /kaggle/input.
+    def snapshot(d):
+        return {str(f.relative_to(d)): (f.stat().st_size, f.stat().st_mtime_ns) for f in d.rglob("*") if f.is_file()}
+
+    def ro_probe():
+        from anytext_loader import resolve_model
+        d = Path(resolve_model(args.model)[0])
+        state["mdir"], state["snap"] = d, snapshot(d)
+        probe = d / ".doctor_write_probe"
+        try:
+            probe.write_text("x"); probe.unlink(); state["writable"] = True
+        except OSError as exc:
+            state["writable"] = False
+            return f"{d} is READ-ONLY ({type(exc).__name__}: {exc.strerror}) -> load/edit below test the read-only case for real"
+        return f"{d} is writable -> read-only safety is judged by the write audit after the edit"
+    check("model dir writable?", ro_probe)
+
     def load():
         from anytext_loader import load_pipeline
         t0 = time.time()
@@ -247,6 +267,19 @@ def stage_anytext(args):
                 f"| mean|diff| inside box={changed} vs top area={outside} (inside >> outside => draw_pos polarity OK)")
     check("AnyText text-editing (1 synthetic)", edit)
 
+    def write_audit():
+        if "snap" not in state or "pipe" not in state:
+            raise RuntimeError("skipped: model dir or pipeline load failed (see FAIL above)")
+        after = snapshot(state["mdir"])
+        changed = sorted(k for k in after if state["snap"].get(k) != after[k])
+        gone = sorted(set(state["snap"]) - set(after))
+        if changed or gone:
+            raise RuntimeError(f"load/edit WROTE into the model dir -> breaks on read-only /kaggle/input: "
+                               f"new/changed={changed[:10]} removed={gone[:10]}")
+        how = "proven: dir is read-only and load+edit passed" if not state["writable"] else               "inferred: dir writable but load+edit wrote nothing into it"
+        return f"0 files written in {state['mdir']} ({len(after)} files) -> read-only safe ({how})"
+    check("model dir untouched by load+edit (read-only safe)", write_audit)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -256,7 +289,8 @@ def main():
     ap.add_argument("--device", default="auto", help="ocr stage: auto | gpu:0 | cpu")
     ap.add_argument("--anytext-dir", default="/tmp/DIFDL/third_party/AnyText")
     ap.add_argument("--full", action="store_true")
-    ap.add_argument("--model", default="auto", help="AnyText model: auto (/tmp/anytext_model) | dir | hub id")
+    ap.add_argument("--model", default="auto", help="AnyText model: auto (/tmp/anytext_model, else /kaggle/input copy) | input (/kaggle/input copy only) | dir | hub id")
+    ap.add_argument("--label", default="", help="suffix for the result json (e.g. _input -> anytext_input.json)")
     ap.add_argument("--out", default="/kaggle/working/doctor")
     args = ap.parse_args()
 
@@ -264,13 +298,13 @@ def main():
     {"env": stage_env, "ocr": stage_ocr, "lama": stage_lama, "anytext": stage_anytext}[args.stage](args)
 
     n_fail = sum(not r["ok"] for r in RESULTS)
-    print(f"===== SUMMARY stage={args.stage}: {len(RESULTS) - n_fail} PASS / {n_fail} FAIL =====")
+    print(f"===== SUMMARY stage={args.stage}{args.label}: {len(RESULTS) - n_fail} PASS / {n_fail} FAIL =====")
     for r in RESULTS:
         if not r["ok"]:
             print(f"  FAIL {r['check']}: {r['detail'][:400]}")
     try:
         Path(args.out).mkdir(parents=True, exist_ok=True)
-        (Path(args.out) / f"{args.stage}.json").write_text(json.dumps(RESULTS, indent=2, default=str))
+        (Path(args.out) / f"{args.stage}{args.label}.json").write_text(json.dumps(RESULTS, indent=2, default=str))
     except OSError:
         pass
 

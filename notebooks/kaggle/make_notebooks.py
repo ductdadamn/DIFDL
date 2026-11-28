@@ -127,6 +127,19 @@ os.environ["TORCH_HOME"] = "/tmp/torch"
     ("code", '''
 !{PY} scripts/kaggle_doctor.py --stage anytext --full
 '''),
+    ("md", '''
+## 5b. AnyText từ bản model trong `/kaggle/input` (thư mục chỉ đọc)
+Cần Add Input notebook/dataset chứa `anytext_model/` (bản đã Save Version). Cell này load model **từ `/kaggle/input`**
+và sửa 1 ảnh: `model dir writable?` phải báo READ-ONLY, và cả 3 check sau đều PASS ⇒ notebook 03 dùng được bản input.
+Không có input → cell tự bỏ qua.
+'''),
+    ("code", '''
+import glob
+if glob.glob("/kaggle/input/**/ms_wrapper.py", recursive=True):
+    !{PY} scripts/kaggle_doctor.py --stage anytext --full --model input --label _input
+else:
+    print("no AnyText model under /kaggle/input -> skip (Add Input the saved anytext_model notebook to run this test)")
+'''),
     ("md", "## 6. Tóm tắt để gửi lại"),
     ("code", '''
 import json, glob

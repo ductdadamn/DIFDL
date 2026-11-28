@@ -153,4 +153,5 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 | `ms_wrapper.py` bản mirror HF (cũ hơn) không nhận `font_path`/`text-editing` | doctor `anytext --full` | Chạy lại lúc ModelScope hết chặn để lấy wrapper v1.1.3 (`ANYTEXT_SOURCE=modelscope`) |
 | `uv` không resolve được torch khi có snapshot (lỗi "no version of torch") | build venv lama / anytext | Bỏ torch khỏi lệnh cài thứ hai trong script setup |
 | Chiều của `draw_pos` (trắng/đen) | `anytext --full: text-editing` (so diff trong box với ngoài box) | `--draw-pos-format file` |
+| ModelScope/AnyText ghi vào thư mục model, nên crash khi model nằm ở `/kaggle/input` (chỉ đọc) | doctor `anytext --full`: `model dir writable?` + `model dir untouched by load+edit` (audit với bản `/tmp`); NB0-10 `--model input` thử thật với bản `/kaggle/input` (#12) | Cho `anytext_loader` copy model từ `/kaggle/input` sang `/tmp` (~1 phút) trước khi load |
 | `paddlepaddle-gpu` không cài/chạy được (index Paddle chậm/không vào được, lệch cuDNN) | NB1-2 in `[WARN] ... falling back to CPU`; doctor `net paddle_gpu_index`, `paddle_device` | Tự lùi về CPU; nếu CPU vẫn chậm, thêm `--det-model PP-OCRv5_mobile_det` vào NB1-5 |

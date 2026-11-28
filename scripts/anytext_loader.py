@@ -35,8 +35,15 @@ def find_kaggle_input_copy(root: Path = Path("/kaggle/input"), max_depth: int = 
 
 def resolve_model(model: str) -> tuple[str, bool]:
     """'auto' -> /tmp/anytext_model if complete, else a complete copy under /kaggle/input, else ERROR.
+    'input' -> only a copy under /kaggle/input.
     (No silent fallback to the hub: modelscope 1.10 cannot download from today's hub and the hub
     rate-limits Kaggle IPs -> confusing secondary errors, KAGGLE_RUN_LOG #9.) Returns (model, is_local)."""
+    if model == "input":  # only a copy under /kaggle/input (read-only) -> doctor's read-only test
+        found = find_kaggle_input_copy()
+        if found is None:
+            raise FileNotFoundError("no complete AnyText model dir under /kaggle/input "
+                                    "(Add Input -> the notebook/dataset that holds anytext_model/)")
+        model = str(found)
     if model == "auto":
         found = DEFAULT_LOCAL if is_complete(DEFAULT_LOCAL) else find_kaggle_input_copy()
         if found is None:
