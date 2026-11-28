@@ -156,6 +156,22 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 
 ---
 
+## #13 — NB3-6 (smoke AnyText 5 mẫu), 28/11/2026: 1/5 mẫu vẽ ra chữ rác ("Micen 64" thay cho ": 08")
+- **Tiến triển:** notebook 03 chạy trọn từ bản model trong `/kaggle/input` (không tải lại), tốc độ 6.3 s/ảnh, 5/5 mẫu sinh xong, 0 lỗi nặng.
+- **Triệu chứng:** với mẫu `anytext_rep_test_X51006334741_02`, log in ra `Prompt: ... "：08"` (byte `EF BC 9A` = U+FF1A, dấu hai chấm **full-width**), và ảnh ra là chữ vô nghĩa "Micen 64".
+- **Nguyên nhân gốc:**
+  - PaddleOCR trả dấu câu full-width (`：`, `，`, ...). `mutate_digits` chỉ đổi chữ số nên giữ nguyên dấu đó trong `new_text`.
+  - AnyText v1.1.3 coi `：` là glyph CJK. Đã xác minh `ms_wrapper.py` v1.1.3 không biến đổi text; dấu `：` đi nguyên vào prompt.
+- **Cách sửa (commit này):** `gen_anytext_findit2.py` chuẩn hóa `unicodedata.normalize("NFKC", new_text)` trước khi tạo prompt (`：08` → `:08`), in `[norm]` cho từng mẫu bị đổi và in tổng số cuối run.
+  - **Không** sửa `select_edit_regions.py`, vì như thế manifest sẽ đổi và làm lệch dữ liệu LaMa đã sinh. GT mask vẫn giữ đúng box cũ.
+- **Nhận xét chất lượng 4 mẫu còn lại (contact sheet NB3-7):**
+  - `2→5` và `0→9`: tự nhiên.
+  - `12.19 S → 12.89S`: đúng chữ nhưng khác font (serif) và mất khoảng trắng.
+  - `UD21-31/2-30 → UD81-71/9-37`: đúng chữ nhưng nhạt và mờ.
+  - Nhãn (mask) của cả 5 mẫu đều đúng, vì vùng đó đều đã bị sửa. Đây là kiểu hạn chế đưa vào Error Analysis: AnyText không giữ được font của hóa đơn in nhiệt.
+
+---
+
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
 | Rủi ro | Doctor check phát hiện | Phương án nếu FAIL |
 |---|---|---|

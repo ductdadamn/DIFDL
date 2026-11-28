@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import time
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -111,14 +112,20 @@ def main():
         return
 
     run = make_backend(args)
-    failed, t0 = [], time.time()
+    failed, t0, n_norm = [], time.time(), 0
     for i, e in enumerate(todo, 1):
         x0, y0, x1, y1 = e["crop"]
         crop = load_rgb(args.findit2_root / e["src"])[y0:y1, x0:x1]
         box = to_crop_coords(e["boxes"], e["crop"])[0]
         gt = boxes_to_mask(crop.shape[0], crop.shape[1], [box], dilate=e["mask_dilate"])
+        # PaddleOCR emits full-width punctuation ('：' U+FF1A, '，'...). AnyText then sees a CJK glyph and draws
+        # garbage (smoke run: ': 03' -> '：08' -> "Micen 64"). NFKC maps them to ASCII (KAGGLE_RUN_LOG #13).
+        text = unicodedata.normalize("NFKC", e["new_text"])
+        if text != e["new_text"]:
+            n_norm += 1
+            print(f"  [norm] {e['id']}: {e['new_text']!r} -> {text!r}")
         try:
-            ai = run(crop, box, e["new_text"], e["seed"])
+            ai = run(crop, box, text, e["seed"])
         except Exception as exc:  # keep going; failed ids are listed at the end
             failed.append((e["id"], str(exc)[:200]))
             continue
@@ -132,6 +139,7 @@ def main():
             el = time.time() - t0
             print(f"  {i}/{len(todo)}  {el / i:.1f}s/img  ETA {(len(todo) - i) * el / i / 60:.1f} min")
 
+    print(f"[AnyText] {n_norm} texts normalized (full-width -> ASCII)")
     if failed:
         print(f"[WARN] {len(failed)} failed:")
         for sid, msg in failed[:20]:
