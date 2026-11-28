@@ -8,7 +8,7 @@ Phụ trách: Squad 1 (CSV #6, #7, #8 – phần AnyText). Toàn bộ dữ liệ
 | Nguồn | Chỉ hóa đơn sạch (`forged == 0`) của `findit2/{train,val,test}.txt`, bỏ `X51008114260.png`. AnyText **chỉ** dùng `test`. |
 | Kích thước | Mảnh `512×512`, góc trên-trái là bội số của 8. |
 | Định dạng | **PNG không nén** cho ảnh và mask. Bản JPEG `QF 70/50` tạo riêng sau (CSV #10). |
-| LaMa (Removal) | Inpaint **toàn hóa đơn** với mask là các dòng chữ OCR nới rộng 3px, sau đó chép lại phần ngoài mask từ ảnh gốc, nên GT = mask chính xác tới từng bit. |
+| LaMa (Removal) | Inpaint một **cửa sổ ngữ cảnh** (mảnh 512 + 256px mỗi phía, tự giảm 128 → 0 nếu thiếu VRAM; KAGGLE_RUN_LOG #8) với mask là các dòng chữ OCR nới rộng 3px, sau đó chép lại phần ngoài mask từ ảnh gốc, nên GT = mask chính xác tới từng bit. |
 | AnyText (Replacement / Insertion) | `text-editing` trên mảnh 512, rồi ghép biên Gaussian ~3px: `I_out = M_soft·I_AI + (1−M_soft)·I_orig`. GT = mask nhị phân **trước** khi blur. File `raw/` lưu ảnh AI chưa ghép. |
 | Đối chứng sạch | Mỗi mẫu có thêm `pristine/<id>.png`: cùng crop, lấy từ hóa đơn gốc. Dùng file này khi tính Image-level AUC/FPR để so ảnh cùng kích thước và cùng định dạng. |
 | Tái lập | Seed toàn cục 42, mỗi mẫu có `seed` riêng trong manifest. |
@@ -23,6 +23,25 @@ data_synth/
   anytext/test/{images,masks,pristine,raw}/<id>.png
   qa/            <gen>_report.json, <gen>_contact_sheet.png
 ```
+
+## Bộ dữ liệu đã phát hành — v1 (28/11/2026)
+Dùng **đúng các version dưới đây** cho train và đánh giá, và ghi rõ trong báo cáo (Chương 3). Nếu ai chạy lại notebook, Kaggle tạo Version 2 với output **khác** → không trộn.
+
+| Notebook (Kaggle, private) | Version | Code (`feat/data`) | Nội dung output | Kết quả QA |
+|---|---|---|---|---|
+| [nb01-prep](https://www.kaggle.com/code/mitepiccagole/nb01-prep) | 1 | `6a032a5` (code chọn vùng không đổi từ đó) | `splits/`, `ocr_cache/`, `manifest_lama.jsonl` (1400), `manifest_anytext.jsonl` (250), `selection_stats.json` | sạch 483/159/183; 21 hóa đơn < 512px bị bỏ; `test_small_text_rate` = 0.0007 |
+| [nb02-lama](https://www.kaggle.com/code/mitepiccagole/nb02-lama) | 1 | `4d16255` | `lama/{train,val,test}/{images,masks,pristine}/` | `generated_ok` 1000/200/200, 0 lỗi, 0 cảnh báo |
+| [nb03-anytext](https://www.kaggle.com/code/mitepiccagole/nb03-anytext) | 1 | `944cbe9` | `anytext/test/{images,masks,pristine,raw}/` (175 replacement + 75 insertion) | `generated_ok` 250, 0 lỗi; 4 text chuẩn hóa NFKC (KAGGLE_RUN_LOG #13) |
+| [anytext-save](https://www.kaggle.com/code/mitepiccagole/anytext-save) | 1 | `739a295` (script tải) | `anytext_model/` — trọng số AnyText v1.1.3 từ ModelScope `damo/` (~7.5GB) | doctor đọc từ `/kaggle/input` (chỉ đọc): 11 PASS (#12) |
+
+**Lấy dữ liệu** (cần được chủ notebook thêm làm *Collaborator — Can view*):
+- Trên Kaggle: *Add Input → Notebooks* → tìm tên notebook → output nằm ở `/kaggle/input/notebooks/mitepiccagole/<notebook>/data_synth/`.
+- Về server/máy: `kaggle kernels output mitepiccagole/nb02-lama -p <thư-mục>` (tương tự `nb03-anytext`), dùng API token của chính mình (`~/.kaggle/kaggle.json`). Lệnh này lấy **version mới nhất** → kiểm tra trang notebook vẫn là Version 1.
+
+**Lưu ý khi dùng:**
+- Train: chỉ `lama/{train,val}/images + masks`. **Không** train trên `pristine/` hay bất cứ gì của `anytext/` (Test Set 2 = AI chưa thấy).
+- Đánh giá AnyText: báo kết quả **tách theo `op`** (replacement / insertion, cột `op` trong manifest) bên cạnh số tổng — insertion thường đậm/khác font nên dễ phát hiện hơn.
+- **Không chạy lại nb01**: OCR trên GPU có thể lệch nhẹ → manifest khác → không khớp dữ liệu LaMa/AnyText đã sinh. T-SROIE: chạy riêng `scripts/split_findit2_ids.py` (danh sách findit2 sạch không phụ thuộc T-SROIE).
 
 ## Chạy toàn bộ trên Kaggle (không cần GPU hay package trên laptop)
 Ba notebook trong [`notebooks/kaggle/`](../notebooks/kaggle/). Lên Kaggle chọn **Create → Notebook → File → Import Notebook**, sau đó chỉnh *Settings* như bảng dưới. Mỗi notebook tự `git clone -b feat/data` repo vào `/tmp/DIFDL`, nên không cần upload code. Nếu repo để private, thêm secret `GITHUB_TOKEN` (*Add-ons → Secrets*); token không được ghi vào output.
@@ -54,7 +73,7 @@ Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `
 
 ### Notebook 03 — AnyText
 - `scripts/setup_anytext.sh` dựng venv theo `environment.yaml` của AnyText (torch 2.0.1, modelscope 1.10, repo ghim ở commit `3d4a260`) tại `/tmp/DIFDL/.venv_anytext`.
-- `scripts/download_anytext_model.sh` tải trọng số (~5–6GB) vào `/tmp/anytext_model` bằng client modelscope mới, vì 1.10 không tải được từ server hiện tại. Nhờ vậy không tốn dung lượng 20GB của `/kaggle/working`.
+- Trọng số: Add Input notebook **`anytext-save`** (bản đã lưu, không cần tải). Nếu không có, `scripts/download_anytext_model.sh` tải (~7.5GB) vào `/tmp/anytext_model` bằng client modelscope mới (1.10 không tải được từ server hiện tại), có retry và dự phòng mirror HF.
 - Font: AnyText cần một file TTF tại `font/Arial_Unicode.ttf`. Notebook copy `DejaVuSans.ttf` của matplotlib sang tên đó, đủ cho chữ Latin và số.
 - **Kiểm tra bằng mắt sau smoke test 5 mẫu** (contact sheet + thư mục `raw/`):
   - Chữ mới phải nằm **đúng trong box**. Nếu AnyText vẽ chữ chỗ khác hoặc vẽ lại cả mảnh, nghĩa là ảnh vị trí bị đảo màu: xóa `data_synth/anytext` rồi chạy lại với `--draw-pos-format file`.
@@ -63,7 +82,7 @@ Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `
 ## QA & bàn giao
 - `qa_synth.py` trả exit 1 nếu có: ảnh sai kích thước, mask rỗng, ảnh bị thay đổi ngoài vùng mask, hoặc leakage ID giữa các split.
 - Contact sheet gồm các cột: pristine | tampered | mask (đỏ) | |diff|×4. Gửi cho Mỹ làm Visual QA (CSV #9).
-- Bàn giao: Zang lấy output về server (`kaggle kernels output <user>/02-lama-findit2 -p ...`, tương tự cho 03), chạy `src/seg_char.py` để tạo `ocr/`, rồi `src/build_path_pkl.py`. Tên mask trùng tên ảnh (`.png`), tương thích với `GeneralValDs`.
+- Bàn giao: Zang lấy output về server (`kaggle kernels output mitepiccagole/nb02-lama -p ...`, tương tự `nb03-anytext`), chạy `src/seg_char.py` để tạo `ocr/`, rồi `src/build_path_pkl.py`. Tên mask trùng tên ảnh (`.png`), tương thích với `GeneralValDs`.
 
 ## Chạy thử pipeline không cần GPU
 Hai script sinh dữ liệu có `--backend dummy` (tô màu nền hoặc vẽ chữ bằng PIL). Chế độ này chỉ dùng để kiểm tra I/O, crop, blend và QA (chỉ cần numpy + Pillow), **không** dùng làm dữ liệu thật.
