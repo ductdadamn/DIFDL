@@ -200,7 +200,11 @@ def stage_anytext(args):
     def import_scan():
         import importlib.util
         from anytext_import_scan import DEFAULT_ROOTS, OPTIONAL, scan
-        wrapper = Path(args.model if args.model != "auto" else "/tmp/anytext_model") / "ms_wrapper.py"
+        from anytext_loader import resolve_model
+        try:  # scan the wrapper of the model dir actually used (auto/input/dir), else the default roots
+            wrapper = Path(resolve_model(args.model)[0]) / "ms_wrapper.py"
+        except FileNotFoundError:
+            wrapper = Path("/nonexistent")
         external, files = scan(ad, [wrapper] if wrapper.exists() else [], DEFAULT_ROOTS)
         missing = sorted(m for m in external if m not in OPTIONAL and importlib.util.find_spec(m) is None)
         if missing:

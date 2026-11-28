@@ -145,6 +145,17 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 
 ---
 
+## #12 — NB0-10 (doctor `anytext --full --model input`), 28/11/2026: load AnyText từ `/kaggle/input` (chỉ đọc) — kiểm chứng, không phải lỗi
+- **Câu hỏi:** model đã được lưu thành output của notebook `anytext-save` và Add Input vào notebook. Liệu modelscope 1.10 / AnyText có cần ghi vào thư mục model không? Nếu có thì sẽ crash trên `/kaggle/input`.
+- **Cách kiểm:** doctor thử ghi một file (probe) vào thư mục model, rồi so danh sách file (kích thước, mtime) trước khi load và sau khi sửa xong 1 ảnh.
+- **Kết quả:**
+  - Probe báo `READ-ONLY (OSError: Read-only file system)`.
+  - Load mất 33 s, sửa ảnh PASS (inside 19.7 vs outside 5.6). Audit báo 0 file bị ghi trong 16 file. Tổng 11 PASS / 0 FAIL.
+  - **Đã chứng minh:** notebook 03 dùng thẳng bản `/kaggle/input`, không cần tải lại model và không phụ thuộc ModelScope.
+- **Sửa kèm:** check import scan trước đây dò `ms_wrapper.py` theo chuỗi `--model` thô, nên khi chạy với `input` thì không tìm thấy (chỉ quét được 56 thay vì 57 file). Nay nó dùng đúng thư mục model mà `resolve_model` trả về.
+
+---
+
 ## Rủi ro còn mở (chưa kiểm chứng trên Kaggle)
 | Rủi ro | Doctor check phát hiện | Phương án nếu FAIL |
 |---|---|---|
@@ -153,5 +164,4 @@ Mỗi lần chạy hỏng được ghi theo khuôn: **Triệu chứng → Nguyê
 | `ms_wrapper.py` bản mirror HF (cũ hơn) không nhận `font_path`/`text-editing` | doctor `anytext --full` | Chạy lại lúc ModelScope hết chặn để lấy wrapper v1.1.3 (`ANYTEXT_SOURCE=modelscope`) |
 | `uv` không resolve được torch khi có snapshot (lỗi "no version of torch") | build venv lama / anytext | Bỏ torch khỏi lệnh cài thứ hai trong script setup |
 | Chiều của `draw_pos` (trắng/đen) | `anytext --full: text-editing` (so diff trong box với ngoài box) | `--draw-pos-format file` |
-| ModelScope/AnyText ghi vào thư mục model, nên crash khi model nằm ở `/kaggle/input` (chỉ đọc) | doctor `anytext --full`: `model dir writable?` + `model dir untouched by load+edit` (audit với bản `/tmp`); NB0-10 `--model input` thử thật với bản `/kaggle/input` (#12) | Cho `anytext_loader` copy model từ `/kaggle/input` sang `/tmp` (~1 phút) trước khi load |
 | `paddlepaddle-gpu` không cài/chạy được (index Paddle chậm/không vào được, lệch cuDNN) | NB1-2 in `[WARN] ... falling back to CPU`; doctor `net paddle_gpu_index`, `paddle_device` | Tự lùi về CPU; nếu CPU vẫn chậm, thêm `--det-model PP-OCRv5_mobile_det` vào NB1-5 |
