@@ -10,12 +10,13 @@
 #
 # Usage:  bash scripts/setup_kaggle_venv.sh ocr     -> /tmp/venv_ocr   (PaddleOCR, GPU if visible else CPU; notebook 01)
 #         bash scripts/setup_kaggle_venv.sh lama    -> /tmp/venv_lama  (LaMa GPU,      notebook 02)
+#         bash scripts/setup_kaggle_venv.sh jpeg    -> /tmp/venv_jpeg  (Pillow only, CPU; notebook 05 JPEG stress)
 # AnyText (notebook 03) uses scripts/setup_anytext.sh (same technique).
 # Idempotent: skipped if the venv already passed its check with the same snapshot date.
 # ==============================================================================
 set -euo pipefail
 
-NAME="${1:?usage: setup_kaggle_venv.sh ocr|lama}"
+NAME="${1:?usage: setup_kaggle_venv.sh ocr|lama|jpeg}"
 VENV="/tmp/venv_${NAME}"
 export PATH="${HOME}/.local/bin:${PATH}"
 export UV_CACHE_DIR=/tmp/uv_cache UV_HTTP_TIMEOUT=300 UV_HTTP_RETRIES=5
@@ -24,7 +25,8 @@ unset UV_SYSTEM_PYTHON  # Kaggle sets it; it only produces warnings for `uv venv
 case "${NAME}" in
   ocr)  SNAPSHOT="${OCR_EXCLUDE_NEWER:-2025-07-15T00:00:00Z}" ;;   # paddle 3.0 / paddleocr 3.0.x / paddlex 3.0.x
   lama) SNAPSHOT="${LAMA_EXCLUDE_NEWER:-2024-07-01T00:00:00Z}" ;;  # torch 2.3.0 era (project env)
-  *) echo "unknown venv '${NAME}' (expected ocr|lama)"; exit 1 ;;
+  jpeg) SNAPSHOT="${JPEG_EXCLUDE_NEWER:-2024-07-01T00:00:00Z}" ;;  # Pillow 10.3 = fixed libjpeg-turbo encoder
+  *) echo "unknown venv '${NAME}' (expected ocr|lama|jpeg)"; exit 1 ;;
 esac
 
 # ocr: GPU build if a GPU is visible (override: OCR_DEVICE=cpu|gpu); recorded in .ok as want=...
@@ -92,6 +94,11 @@ case "${NAME}" in
     "${UVI[@]}" --exclude-newer "${SNAPSHOT}" \
         "torch==2.3.0+cu121" "torchvision==0.18.0+cu121" "simple-lama-inpainting==0.1.2" "numpy>=1.26.4,<2.0.0"
     CHECK='import torch, numpy, PIL, simple_lama_inpainting; print("torch", torch.__version__, "| cuda", torch.cuda.is_available(), "| numpy", numpy.__version__, "| Pillow", PIL.__version__)'
+    ;;
+  jpeg)
+    # The JPEG encoder is part of the result (quant tables, chroma subsampling, DCT rounding), so it is pinned
+    "${UVI[@]}" --exclude-newer "${SNAPSHOT}" "Pillow==10.3.0" "numpy>=1.26.4,<2.0.0"
+    CHECK='import PIL, numpy; from PIL import features; print("Pillow", PIL.__version__, "| libjpeg_turbo", features.version("libjpeg_turbo"), "| numpy", numpy.__version__)'
     ;;
 esac
 

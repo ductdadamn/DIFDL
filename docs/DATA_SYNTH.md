@@ -7,7 +7,7 @@ Phụ trách: Squad 1 (CSV #6, #7, #8 – phần AnyText). Toàn bộ dữ liệ
 |---|---|
 | Nguồn | Chỉ hóa đơn sạch (`forged == 0`) của `findit2/{train,val,test}.txt`, bỏ `X51008114260.png`. AnyText **chỉ** dùng `test`. |
 | Kích thước | Mảnh `512×512`, góc trên-trái là bội số của 8. |
-| Định dạng | **PNG không nén** cho ảnh và mask. Bản JPEG `QF 70/50` tạo riêng sau (CSV #10). |
+| Định dạng | **PNG không nén** cho ảnh và mask. Bản JPEG `QF 70/50` (Test Set 3) do notebook 05 tạo riêng, xem mục *Stress Test JPEG*. |
 | LaMa (Removal) | Inpaint một **cửa sổ ngữ cảnh** (mảnh 512 + 256px mỗi phía, tự giảm 128 → 0 nếu thiếu VRAM; KAGGLE_RUN_LOG #8) với mask là các dòng chữ OCR nới rộng 3px, sau đó chép lại phần ngoài mask từ ảnh gốc, nên GT = mask chính xác tới từng bit. |
 | AnyText (Replacement / Insertion) | `text-editing` trên mảnh 512, rồi ghép biên Gaussian ~3px: `I_out = M_soft·I_AI + (1−M_soft)·I_orig`. GT = mask nhị phân **trước** khi blur. File `raw/` lưu ảnh AI chưa ghép. |
 | Đối chứng sạch | Mỗi mẫu có thêm `pristine/<id>.png`: cùng crop, lấy từ hóa đơn gốc. Dùng file này khi tính Image-level AUC/FPR để so ảnh cùng kích thước và cùng định dạng. |
@@ -70,6 +70,12 @@ Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `
 ### Notebook 02 — LaMa
 - Venv `/tmp/venv_lama`: torch 2.3.0+cu121 (giống env chính của dự án) và `simple-lama-inpainting==0.1.2`. File `big-lama.pt` được tải vào `/tmp/torch`.
 - Smoke test 10 mẫu → QA → xem contact sheet → chạy đủ. Mẫu đã có sẽ được bỏ qua.
+
+### Notebook 05 — Stress Test JPEG QF 70 / 50 (Test Set 3, CSV #10)
+- CPU, ~2 phút. Add Input các notebook sinh dữ liệu (`nb02-lama`, `nb03-anytext`, sau này SD-1.5 / TextDiffuser / T-SROIE). `scripts/make_jpeg_stress.py --src auto` tự tìm mọi `<gen>/test/`.
+- Mỗi ảnh được nén **1 lần** từ PNG gốc ra file `.jpg` thật trên đĩa (không mô phỏng trong RAM): Pillow 10.3 ghim (venv `jpeg`), bảng lượng tử IJG chuẩn theo QF, 4:2:0, baseline. Script đọc lại từng file và kiểm tra định dạng, bảng lượng tử và subsampling.
+- **`pristine/` cũng được nén cùng QF.** Nếu chỉ nén ảnh giả, mô hình có thể phân biệt giả/thật nhờ định dạng file → AUC/FPR dưới nén vô nghĩa. Mask giữ PNG, chép nguyên từng byte.
+- Output: `data_synth_stress/<gen>/test_qf{70,50}/{images,pristine}/<id>.jpg` + `masks/<id>.png` + `stress_manifest.json`. Khi đánh giá, đưa thẳng file `.jpg` vào từng model, **không** chuyển lại sang PNG. Lưu ý cho Zam: `GeneralValDs` của ADCD-Net (`src/ds.py`, `jpeg_record=[100]`) giải mã ảnh rồi nén lại ở QF100 trước khi lấy DCT, nên nó thấy dấu vết nén trong điểm ảnh chứ **không** đọc bảng lượng tử QF70/50 của file. Muốn ADCD-Net dùng DCT gốc của file thì phải sửa loader. Đây là quyết định của Metrics Protocol, phải ghi rõ và áp dụng giống nhau cho mọi mô hình.
 
 ### Notebook 03 — AnyText
 - `scripts/setup_anytext.sh` dựng venv theo `environment.yaml` của AnyText (torch 2.0.1, modelscope 1.10, repo ghim ở commit `3d4a260`) tại `/tmp/DIFDL/.venv_anytext`.

@@ -1,4 +1,4 @@
-"""Generate the 3 Kaggle notebooks of the findit2 synthesis pipeline (edit here, then re-run).
+"""Generate the Kaggle notebooks of the findit2 synthesis pipeline (edit here, then re-run).
 
     python notebooks/kaggle/make_notebooks.py
 
@@ -266,8 +266,48 @@ for e in [json.loads(l) for l in open(MAN)][:5]:
     ("code", SHOW.format(gen="anytext")),
 ], gpu=True)
 
+# ------------------------------------------------------------------ 05 JPEG stress (CPU)
+NB5 = build(5, [
+    ("md", """
+# 05 — Stress Test JPEG QF 70 / 50 (Test Set 3, CSV #10) — CPU, ~2 phút
+**Settings:** Accelerator = **None** (CPU), Internet = On.
+**Add Input** (Your Work → Notebooks): **nb02-lama** và **nb03-anytext** (sau này thêm notebook SD-1.5 / TextDiffuser / T-SROIE).
+Không cần findit2.
+Mỗi bộ `<gen>/test` được nén **1 lần** từ PNG ra file `.jpg` thật (Pillow 10.3 ghim, 4:2:0). `pristine/` cũng được nén
+(để AUC/FPR không phân biệt được giả/thật chỉ nhờ định dạng). Mask giữ PNG, chép nguyên.
+Output: `/kaggle/working/data_synth_stress/<gen>/test_qf{70,50}/{images,pristine,masks}/` + `stress_manifest.json`.
+Script tự kiểm tra từng file: đúng JPEG, bảng lượng tử khớp QF, 4:2:0. Xong → **Save Version**.
+"""),
+    ("code", CLONE),
+    ("code", """
+!bash scripts/setup_kaggle_venv.sh jpeg
+PY = "/tmp/venv_jpeg/bin/python"
+"""),
+    ("code", """
+!{PY} scripts/make_jpeg_stress.py --src auto --out /kaggle/working/data_synth_stress
+"""),
+    ("code", """
+# Xem 1 mẫu mỗi bộ: PNG gốc | QF70 | QF50 (phóng to 2x một góc 128px để thấy block 8x8)
+import json, matplotlib.pyplot as plt
+from pathlib import Path
+from PIL import Image
+OUT = Path("/kaggle/working/data_synth_stress")
+man = json.load(open(OUT / "stress_manifest.json")); print(json.dumps(man["sets"], indent=1))
+gens = sorted({k.split("/")[0] for k in man["sets"]})
+fig, ax = plt.subplots(len(gens), 3, figsize=(9, 3 * len(gens)), squeeze=False)
+for r, g in enumerate(gens):
+    jp = sorted((OUT / g / "test_qf70" / "images").glob("*.jpg"))[0]
+    src = next(Path("/kaggle/input").rglob(f"{g}/test/images/{jp.stem}.png"))
+    for c, (t, f) in enumerate([("PNG", src), ("QF70", jp), ("QF50", OUT / g / "test_qf50" / "images" / jp.name)]):
+        ax[r][c].imshow(Image.open(f).convert("RGB").crop((192, 192, 320, 320)).resize((256, 256), Image.NEAREST))
+        ax[r][c].set_title(f"{g} {t}"); ax[r][c].axis("off")
+plt.tight_layout(); plt.show()
+"""),
+], gpu=False)
+
 if __name__ == "__main__":
     for name, book in [("00_doctor.ipynb", NB0), ("01_prep_findit2.ipynb", NB1), ("02_lama_findit2.ipynb", NB2),
-                       ("03_anytext_findit2.ipynb", NB3)]:
+                       ("03_anytext_findit2.ipynb", NB3),
+                       ("05_jpeg_stress.ipynb", NB5)]:
         (HERE / name).write_text(json.dumps(book, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print("wrote", HERE / name)
