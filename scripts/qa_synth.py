@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Automatic QA + contact sheet for generated findit2 samples (LaMa / AnyText).
+"""Automatic QA + contact sheet for generated findit2 samples (LaMa / SD-1.5 / AnyText).
 
 Checks per manifest entry:
   - images/, masks/, pristine/ files exist, are 512x512, mask non-empty
   - tampered vs pristine identical outside the (grown) GT mask   -> GT is trustworthy
   - something actually changed inside the mask                    -> generator did work
 Global checks: no receipt ID in two splits, AnyText only on test, quota per gen/split.
+SD-1.5: ink-QA flag rate (qa/sd15_ink.jsonl) and, with --pair-root, paired rows must have the SAME mask
+and pristine crop as their LaMa pair (paired CNN-vs-diffusion benchmark).
 Writes <out>/qa/<gen>_report.json and <gen>_contact_sheet.png (pristine | tampered | mask overlay | |diff|x4).
 
 Usage: python scripts/qa_synth.py --gen lama        (exit 1 on any hard failure)
@@ -25,8 +27,9 @@ from PIL import Image
 from synth_common import CROP, dilate, read_jsonl, receipt_id, sample_paths
 
 ROOT = Path(__file__).resolve().parents[1]
-# outside-band tolerance: LaMa is copied back bit-exact; AnyText has a Gaussian band (grow 3 + ~3 sigma)
-OUTSIDE_GROW = {"lama": 0, "anytext": 14}
+# outside-band tolerance: LaMa and SD-1.5 (inner feather) are bit-exact outside the GT; AnyText has a Gaussian
+# band outside the GT (grow 3 + ~3 sigma)
+OUTSIDE_GROW = {"lama": 0, "sd15": 0, "anytext": 14}
 
 
 def load(p: Path, mode="RGB"):
@@ -48,11 +51,13 @@ def contact_sheet(rows, path: Path, cell=256):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--gen", choices=["lama", "anytext"], required=True)
+    ap.add_argument("--gen", choices=["lama", "sd15", "anytext"], required=True)
     ap.add_argument("--out", type=Path, default=ROOT / "data_synth")
     ap.add_argument("--manifest", type=Path, default=None)
     ap.add_argument("--sheet-n", type=int, default=24, help="rows in the contact sheet")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--pair-root", type=Path, default=None,
+                    help="sd15: dir holding lama/<split>/{masks,pristine} to verify the LaMa pairs")
     args = ap.parse_args()
     manifest = args.manifest or args.out / f"manifest_{args.gen}.jsonl"
     entries = [e for e in read_jsonl(manifest) if e["gen"] == args.gen]
@@ -88,6 +93,27 @@ def main():
         for b in splits[i + 1:]:
             if split_ids[a] & split_ids[b]:
                 hard["receipt_id_leakage"].append(f"{a}/{b}: {sorted(split_ids[a] & split_ids[b])[:5]}")
+    extra = {}
+    if args.gen == "sd15":
+        qa_path = args.out / "qa" / "sd15_ink.jsonl"
+        ink = {r["id"]: r for r in read_jsonl(qa_path)} if qa_path.exists() else {}
+        flagged = sorted(i for i, r in ink.items() if r["flag"])
+        extra["ink_qa"] = {"records": len(ink), "retried": sum(r["attempts"] > 1 for r in ink.values()),
+                           "flagged": len(flagged), "flag_rate": round(len(flagged) / max(1, len(ink)), 4),
+                           "flagged_ids": flagged[:50]}
+        if args.pair_root:
+            n_pair = 0
+            for e, p in ok_entries:
+                if "pair_id" not in e:
+                    continue
+                lp = sample_paths(args.pair_root, {**e, "id": e["pair_id"], "gen": "lama"})
+                if not (lp["masks"].exists() and lp["pristine"].exists()):
+                    hard["pair_missing_lama"].append(e["id"]); continue
+                if not (np.array_equal(load(lp["masks"], "L"), load(p["masks"], "L"))
+                        and np.array_equal(load(lp["pristine"]), load(p["pristine"]))):
+                    hard["pair_differs_from_lama"].append(e["id"])
+                n_pair += 1
+            extra["paired_checked"] = n_pair
     if args.gen == "anytext" and any(e["split"] != "test" for e in entries):
         hard["anytext_outside_test"].append("manifest contains non-test AnyText rows")
 
@@ -103,12 +129,14 @@ def main():
               "generated_ok_per_split": dict(done),
               "hard_failures": {k: v[:50] for k, v in hard.items()}, "hard_failure_counts": {k: len(v) for k, v in hard.items()},
               "warnings": {k: v[:50] for k, v in soft.items()}, "warning_counts": {k: len(v) for k, v in soft.items()},
-              "contact_sheet": str(sheet)}
+              "contact_sheet": str(sheet), **extra}
     rp = args.out / "qa" / f"{args.gen}_report.json"
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in ("manifest_per_split", "generated_ok_per_split",
                                              "hard_failure_counts", "warning_counts")}, indent=2))
+    if extra:
+        print(json.dumps(extra, indent=2))
     print(f"[QA] report: {rp}\n[QA] sheet : {sheet}")
     sys.exit(1 if hard else 0)
 

@@ -137,6 +137,32 @@ def soft_blend_mask(gt: np.ndarray, grow: int = 3, sigma: float = 3.0) -> np.nda
     return alpha
 
 
+def inner_feather(gt: np.ndarray, px: int = 3, lo: float = 0.3) -> np.ndarray:
+    """Float32 alpha feathered INSIDE the GT: `lo` on the GT border, ramping to 1 at `px` px inside, exact 0
+    outside. Used for TRAIN data (SD-1.5): hides the VAE colour-shift seam while every pixel outside the GT
+    stays bit-exact, so the label is exact (unlike soft_blend_mask, whose band lies outside the GT)."""
+    g = (gt > 0).astype(np.uint8)
+    depth = np.zeros(g.shape, np.float32)  # number of 3x3 erosions a pixel survives, capped at px
+    cur = Image.fromarray(g * 255)
+    for _ in range(px):
+        cur = cur.filter(ImageFilter.MinFilter(3))
+        depth += np.array(cur, np.float32) / 255.0
+    alpha = g * (lo + (1.0 - lo) * depth / max(px, 1))
+    return alpha.astype(np.float32)
+
+
+def latent_cover_mask(gt: np.ndarray, grow: int = 4, cell: int = 8) -> np.ndarray:
+    """{0,1} mask covering every 8x8 latent cell touched by the GT (grown by `grow`). SD's 64x64 latent mask
+    must contain the whole GT, otherwise border latents are 'kept' and copy the grey masked-out pixels."""
+    h, w = gt.shape
+    m = dilate(gt, grow)
+    hb, wb = -(-h // cell), -(-w // cell)
+    pad = np.zeros((hb * cell, wb * cell), np.uint8)
+    pad[:h, :w] = m
+    blocks = pad.reshape(hb, cell, wb, cell).max(axis=(1, 3))
+    return np.kron(blocks, np.ones((cell, cell), np.uint8))[:h, :w]
+
+
 def blend(ai: np.ndarray, orig: np.ndarray, alpha: np.ndarray) -> np.ndarray:
     """I_out = alpha * I_AI + (1 - alpha) * I_orig (uint8 RGB)."""
     a = alpha[..., None]

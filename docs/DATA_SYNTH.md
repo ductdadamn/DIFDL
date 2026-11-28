@@ -1,4 +1,4 @@
-# Sinh dữ liệu AI trên findit2 (LaMa + AnyText) — Hướng dẫn chạy
+# Sinh dữ liệu AI trên findit2 (LaMa + SD-1.5 + AnyText) — Hướng dẫn chạy
 
 Phụ trách: Squad 1 (CSV #6, #7, #8 – phần AnyText). Toàn bộ dữ liệu sinh ra nằm trong `data_synth/` (đã có trong `.gitignore`).
 
@@ -9,6 +9,9 @@ Phụ trách: Squad 1 (CSV #6, #7, #8 – phần AnyText). Toàn bộ dữ liệ
 | Kích thước | Mảnh `512×512`, góc trên-trái là bội số của 8. |
 | Định dạng | **PNG không nén** cho ảnh và mask. Bản JPEG `QF 70/50` (Test Set 3) do notebook 05 tạo riêng, xem mục *Stress Test JPEG*. |
 | LaMa (Removal) | Inpaint một **cửa sổ ngữ cảnh** (mảnh 512 + 256px mỗi phía, tự giảm 128 → 0 nếu thiếu VRAM; KAGGLE_RUN_LOG #8) với mask là các dòng chữ OCR nới rộng 3px, sau đó chép lại phần ngoài mask từ ảnh gốc, nên GT = mask chính xác tới từng bit. |
+| SD-1.5 Inpainting (Removal) | **Train 500:** vùng mới, khác mọi dòng LaMa/AnyText đã dùng (seed 123, ≤ 2 mảnh/hóa đơn). **Val 100 / Test 200:** **cùng crop + mask** với LaMa (`pair_id`), so sánh CNN và Diffusion có cặp đối chứng. GT giống hệt LaMa (dòng OCR + 3px). SD nhận mask phủ trọn các ô latent 8×8 của GT, prompt "blank receipt paper, no text" và negative cấm chữ. Kết quả được ghép bằng alpha **feather vào trong GT** (0.3 ở mép → 1 ở 3px bên trong, đúng 0 bên ngoài), nên ngoài GT bit-exact như LaMa, không lộ viền do VAE đổi màu toàn ảnh. |
+| Chính sách ghép biên | Dữ liệu **train** (LaMa, SD-1.5): ngoài GT bit-exact, nhãn chính xác tới từng pixel. Dữ liệu **chỉ dùng test** (AnyText, TextDiffuser): Gaussian ~3px **ra ngoài** GT theo MASTER_PLAN. Với hai bộ này, dải chuyển tiếp không tính là giả. |
+| QA mực SD-1.5 | Tỷ lệ pixel tối (<120) trong GT phải ≤ max(2%, tỷ lệ ở vòng giấy 6px quanh GT + 2%). Không đạt → thử lại seed+1, seed+2; vẫn không đạt → giữ bản ít mực nhất, `flag=true` trong `qa/sd15_ink.jsonl`. Vùng đó vẫn bị sửa nên nhãn vẫn đúng. Báo tỷ lệ flag ở Limitations. |
 | AnyText (Replacement / Insertion) | `text-editing` trên mảnh 512, rồi ghép biên Gaussian ~3px: `I_out = M_soft·I_AI + (1−M_soft)·I_orig`. GT = mask nhị phân **trước** khi blur. File `raw/` lưu ảnh AI chưa ghép. |
 | Đối chứng sạch | Mỗi mẫu có thêm `pristine/<id>.png`: cùng crop, lấy từ hóa đơn gốc. Dùng file này khi tính Image-level AUC/FPR để so ảnh cùng kích thước và cùng định dạng. |
 | Tái lập | Seed toàn cục 42, mỗi mẫu có `seed` riêng trong manifest. |
@@ -19,7 +22,10 @@ data_synth/
   splits/        findit2_clean_*.txt, tsroie_*.txt, split_summary.json
   ocr_cache/     <stem>.json  (box + text OCR của từng hóa đơn)
   manifest_lama.jsonl, manifest_anytext.jsonl, selection_stats.json
+  manifest_sd15.jsonl, sd15_selection_stats.json          (notebook 04, từ output nb01)
   lama/{train,val,test}/{images,masks,pristine}/<id>.png
+  sd15/{train,val,test}/{images,masks,pristine,raw}/<id>.png
+  sd15_textdemo/{orig,sd15,raw}/, textdemo_sheet.png      (hình minh họa, KHÔNG thuộc dataset)
   anytext/test/{images,masks,pristine,raw}/<id>.png
   qa/            <gen>_report.json, <gen>_contact_sheet.png
 ```
@@ -39,7 +45,8 @@ Dùng **đúng các version dưới đây** cho train và đánh giá, và ghi r
 - Về server/máy: `kaggle kernels output mitepiccagole/nb02-lama -p <thư-mục>` (tương tự `nb03-anytext`), dùng API token của chính mình (`~/.kaggle/kaggle.json`). Lệnh này lấy **version mới nhất** → kiểm tra trang notebook vẫn là Version 1.
 
 **Lưu ý khi dùng:**
-- Train: chỉ `lama/{train,val}/images + masks`. **Không** train trên `pristine/` hay bất cứ gì của `anytext/` (Test Set 2 = AI chưa thấy).
+- Train: chỉ `lama/{train,val}` và `sd15/{train,val}` (`images + masks`). **Không** train trên `pristine/`, `raw/`, `sd15_textdemo/` hay bất cứ gì của `anytext/` (Test Set 2 = AI chưa thấy).
+- Test Set 1: `lama/test` và `sd15/test` là **cặp** (cùng crop + mask, nối theo `pair_id`). Báo F1 riêng cho từng generator; hiệu F1 giữa hai bên chỉ phản ánh khác biệt CNN và Diffusion. Hai bộ dùng chung `pristine/`, nên khi tính AUC/FPR gộp chỉ lấy mỗi pristine một lần.
 - Đánh giá AnyText: báo kết quả **tách theo `op`** (replacement / insertion, cột `op` trong manifest) bên cạnh số tổng — insertion thường đậm/khác font nên dễ phát hiện hơn.
 - **Không chạy lại nb01**: OCR trên GPU có thể lệch nhẹ → manifest khác → không khớp dữ liệu LaMa/AnyText đã sinh. T-SROIE: chạy riêng `scripts/split_findit2_ids.py` (danh sách findit2 sạch không phụ thuộc T-SROIE).
 
@@ -70,6 +77,13 @@ Các script tự dò dữ liệu trong `/kaggle/input` (`--findit2-root auto`, `
 ### Notebook 02 — LaMa
 - Venv `/tmp/venv_lama`: torch 2.3.0+cu121 (giống env chính của dự án) và `simple-lama-inpainting==0.1.2`. File `big-lama.pt` được tải vào `/tmp/torch`.
 - Smoke test 10 mẫu → QA → xem contact sheet → chạy đủ. Mẫu đã có sẽ được bỏ qua.
+
+### Notebook 04 — SD-1.5 Inpainting Removal
+- Add Input: findit2 + **nb01-prep** (bắt buộc) + **nb02-lama** (kiểm tra cặp) + **nb03-anytext** (hình "SD viết chữ").
+- `select_sd15_regions.py` đọc `ocr_cache/` + manifest của nb01 (không OCR lại), viết `manifest_sd15.jsonl` và kiểm tra bất biến: train không trùng dòng LaMa/AnyText, không rò ID hóa đơn giữa các split, val/test khớp LaMa từng mục.
+- Venv `/tmp/venv_sd15`: torch 2.3.0+cu121, diffusers 0.29. Model `stable-diffusion-v1-5/stable-diffusion-inpainting` ghim commit `8a4288a` (bản `runwayml/` đã bị gỡ khỏi HF), chỉ tải fp16 safetensors (~2 GB) vào `/tmp/sd15_model`. Safety checker tắt (ảnh hóa đơn, tránh bị bôi đen nhầm).
+- Smoke test 10 mẫu → contact sheet → chạy đủ 800 (~45–70 phút T4). `qa_synth.py --gen sd15 --pair-root <lama>` kiểm tra thêm: ngoài GT bit-exact, mask và pristine trùng với cặp LaMa, và tỷ lệ flag.
+- `--textdemo 10`: SD được yêu cầu **viết** số mới trên cùng crop/hộp với AnyText replacement → `sd15_textdemo/textdemo_sheet.png` (gốc | SD-1.5 | AnyText) cho Mỹ (CSV #21) và Kiều (Error Analysis).
 
 ### Notebook 05 — Stress Test JPEG QF 70 / 50 (Test Set 3, CSV #10)
 - CPU, ~2 phút. Add Input các notebook sinh dữ liệu (`nb02-lama`, `nb03-anytext`, sau này SD-1.5 / TextDiffuser / T-SROIE). `scripts/make_jpeg_stress.py --src auto` tự tìm mọi `<gen>/test/`.

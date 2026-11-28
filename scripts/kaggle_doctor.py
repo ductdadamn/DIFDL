@@ -8,6 +8,7 @@ Each stage runs a list of independent checks (one failure never stops the others
   python scripts/kaggle_doctor.py --stage env                          # Kaggle python: hw, disk, net, inputs
   /tmp/venv_ocr/bin/python  scripts/kaggle_doctor.py --stage ocr       # PaddleOCR on 1 real receipt
   /tmp/venv_lama/bin/python scripts/kaggle_doctor.py --stage lama      # LaMa on GPU, 1 synthetic inpaint
+  /tmp/venv_sd15/bin/python scripts/kaggle_doctor.py --stage sd15      # SD-1.5 inpainting: download, load, 1 edit
   /tmp/DIFDL/.venv_anytext/bin/python scripts/kaggle_doctor.py --stage anytext [--full]
         (--full loads the weights from scripts/download_anytext_model.sh and runs 1 edit)
 Stdlib-only at import time; runs on Python 3.10-3.13.
@@ -285,21 +286,74 @@ def stage_anytext(args):
     check("model dir untouched by load+edit (read-only safe)", write_audit)
 
 
+def stage_sd15(args):
+    import numpy as np
+    check("versions", lambda: versions("torch", "numpy", "PIL", "diffusers", "transformers", "accelerate",
+                                       "huggingface_hub", "safetensors"))
+    import torch
+    check("cuda", lambda: f"{torch.cuda.is_available()} | {torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-'}"
+          f" | torch cuda {torch.version.cuda}")
+    from sd15_loader import REPO, REVISION, inpaint, load_pipeline, resolve_model
+    state = {}
+
+    def model():
+        t0 = time.time()
+        state["mdir"], origin = resolve_model("auto" if args.model == "auto" else args.model)
+        size = sum(f.stat().st_size for f in Path(state["mdir"]).rglob("*") if f.is_file()) / 2**30
+        return f"{state['mdir']} ({origin}, {size:.2f} GB, {time.time() - t0:.0f}s) | pinned {REPO}@{REVISION[:7]}"
+    check("model (fp16 safetensors, pinned revision)", model)
+
+    def load():
+        t0 = time.time()
+        state["pipe"] = load_pipeline(state["mdir"])
+        p = state["pipe"]
+        return (f"{type(p).__name__} in {time.time() - t0:.0f}s | unet in_channels={p.unet.config.in_channels} "
+                f"(9 = inpainting UNet) | scheduler={type(p.scheduler).__name__} | safety_checker={p.safety_checker}")
+    check("pipeline load (fp16, cuda)", load)
+
+    def edit():
+        from PIL import Image
+        from synth_common import blend, boxes_to_mask, inner_feather, latent_cover_mask
+        from gen_sd15_findit2 import ink_stats
+        with Image.open(first_receipt()) as im:
+            rgb = np.array(im.convert("RGB"))
+        crop = rgb[:512, :512].copy() if min(rgb.shape[:2]) >= 512 else np.full((512, 512, 3), 230, np.uint8)
+        gt = boxes_to_mask(512, 512, [[96, 200, 400, 228]], dilate=3)
+        torch.cuda.reset_peak_memory_stats()
+        times = []
+        for seed in (1, 2):  # 2nd call = steady-state speed for the ETA
+            t0 = time.time()
+            raw = inpaint(state["pipe"], crop, latent_cover_mask(gt), seed)
+            times.append(time.time() - t0)
+        out = blend(raw, crop, inner_feather(gt))
+        outside = int(np.abs(out.astype(int) - crop.astype(int))[gt == 0].max(initial=0))
+        vae_shift = float(np.abs(raw.astype(int) - crop.astype(int))[gt == 0].mean())
+        inside = float(np.abs(out.astype(int) - crop.astype(int))[gt > 0].mean())
+        dark, ring, ok = ink_stats(out, crop, gt)
+        if raw.shape != (512, 512, 3) or outside != 0 or inside < 1.0:
+            raise RuntimeError(f"raw {raw.shape}, max|diff| outside GT after paste={outside} (must be 0), "
+                               f"mean|diff| inside={inside:.2f} (must be > 1)")
+        return (f"{times[-1]:.1f}s/img (1st {times[0]:.1f}s), peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.2f} GB | "
+                f"outside GT after paste: max|diff|=0 (bit-exact) | raw SD outside GT mean|diff|={vae_shift:.2f} "
+                f"(VAE shift the paste removes) | inside mean|diff|={inside:.1f} | ink dark={dark:.3f} ring={ring:.3f} ok={ok}")
+    check("SD-1.5 inpaint 1 crop + inner-feather paste", edit)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["env", "ocr", "lama", "anytext"], required=True)
+    ap.add_argument("--stage", choices=["env", "ocr", "lama", "sd15", "anytext"], required=True)
     ap.add_argument("--det-model", default="PP-OCRv5_server_det")
     ap.add_argument("--rec-model", default="PP-OCRv5_mobile_rec")
     ap.add_argument("--device", default="auto", help="ocr stage: auto | gpu:0 | cpu")
     ap.add_argument("--anytext-dir", default="/tmp/DIFDL/third_party/AnyText")
     ap.add_argument("--full", action="store_true")
-    ap.add_argument("--model", default="auto", help="AnyText model: auto (/tmp/anytext_model, else /kaggle/input copy) | input (/kaggle/input copy only) | dir | hub id")
+    ap.add_argument("--model", default="auto", help="AnyText / SD-1.5 model: auto (/tmp/anytext_model, else /kaggle/input copy) | input (/kaggle/input copy only) | dir | hub id")
     ap.add_argument("--label", default="", help="suffix for the result json (e.g. _input -> anytext_input.json)")
     ap.add_argument("--out", default="/kaggle/working/doctor")
     args = ap.parse_args()
 
     print(f"===== DOCTOR stage={args.stage} python={sys.version.split()[0]} =====", flush=True)
-    {"env": stage_env, "ocr": stage_ocr, "lama": stage_lama, "anytext": stage_anytext}[args.stage](args)
+    {"env": stage_env, "ocr": stage_ocr, "lama": stage_lama, "sd15": stage_sd15, "anytext": stage_anytext}[args.stage](args)
 
     n_fail = sum(not r["ok"] for r in RESULTS)
     print(f"===== SUMMARY stage={args.stage}{args.label}: {len(RESULTS) - n_fail} PASS / {n_fail} FAIL =====")

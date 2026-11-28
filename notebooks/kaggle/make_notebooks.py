@@ -91,7 +91,7 @@ NB0 = build(0, [
 **Settings:** Accelerator = **GPU T4**, Internet = On, Add Input = dataset findit2.
 Mỗi cell in `[PASS]/[FAIL] ...` và một dòng `SUMMARY`; một check lỗi không chặn các check khác.
 **Gửi lại:** chỉ cần các dòng `SUMMARY` + `FAIL` (cell cuối gom sẵn). Kết quả cũng lưu ở `/kaggle/working/doctor/*.json`.
-Thời gian: ~20–30 phút (dựng 3 venv). Venv nằm trong `/tmp`, nên chỉ dùng lại được trong cùng session.
+Thời gian: ~25–40 phút (dựng 4 venv). Venv nằm trong `/tmp`, nên chỉ dùng lại được trong cùng session.
 '''),
     ("code", CLONE),
     ("md", "## 1. Phần cứng, ổ đĩa, mạng tới từng nguồn tải, dataset (Python của Kaggle)"),
@@ -139,6 +139,15 @@ if glob.glob("/kaggle/input/**/ms_wrapper.py", recursive=True):
     !{PY} scripts/kaggle_doctor.py --stage anytext --full --model input --label _input
 else:
     print("no AnyText model under /kaggle/input -> skip (Add Input the saved anytext_model notebook to run this test)")
+'''),
+    ("md", """
+## 5c. Venv SD-1.5 Inpainting + tải model ghim (~2 GB fp16) + sửa 1 mảnh
+Kiểm tra: UNet 9 kênh (bản inpainting), ngoài mask **bit-exact** sau khi ghép (feather vào trong), tốc độ s/ảnh để ước ETA.
+"""),
+    ("code", '''
+os.environ["HF_HOME"] = "/tmp/hf"
+!bash scripts/setup_kaggle_venv.sh sd15
+!/tmp/venv_sd15/bin/python scripts/kaggle_doctor.py --stage sd15
 '''),
     ("md", "## 6. Tóm tắt để gửi lại"),
     ("code", '''
@@ -266,6 +275,66 @@ for e in [json.loads(l) for l in open(MAN)][:5]:
     ("code", SHOW.format(gen="anytext")),
 ], gpu=True)
 
+# ------------------------------------------------------------------ 04 SD-1.5 Inpainting Removal (GPU)
+NB4 = build(4, [
+    ("md", '''
+# 04 — Sinh SD-1.5 Inpainting Removal (Seen AI, 500/100/200) (GPU T4)
+**Settings:** Accelerator = **GPU T4**, Internet = On.
+**Add Input:** dataset findit2 + output **nb01-prep** (bắt buộc) + **nb02-lama** (để kiểm tra cặp) + **nb03-anytext** (cho hình "SD viết chữ").
+- **Train 500:** vùng **mới**, khác các dòng LaMa/AnyText đã dùng (seed 123, tối đa 2 mảnh/hóa đơn). **Không** chạy lại nb01.
+- **Val 100 / Test 200:** **cùng crop + mask** với LaMa (`pair_id`), so sánh CNN và Diffusion trên đúng cùng một vùng.
+- Prompt nền giấy trắng + negative cấm chữ; ghép **feather vào trong mask** → ngoài mask giữ nguyên ảnh gốc 100% (nhãn đúng).
+- QA mực trong mask: thử lại tối đa 2 seed; vẫn bẩn → giữ bản ít mực nhất + gắn cờ (`qa/sd15_ink.jsonl`).
+Venv ghim `/tmp/venv_sd15` (torch 2.3.0, diffusers 0.29); model `stable-diffusion-v1-5/stable-diffusion-inpainting` ghim commit.
+Output: `/kaggle/working/data_synth/sd15/{train,val,test}/{images,masks,pristine,raw}/` + `sd15_textdemo/` + `qa/`.
+'''),
+    ("code", CLONE),
+    ("code", '''
+!bash scripts/setup_kaggle_venv.sh sd15
+PY = "/tmp/venv_sd15/bin/python"
+os.environ["HF_HOME"] = "/tmp/hf"
+'''),
+    ("md", "## 1. Chọn vùng SD-1.5 từ output nb01 (CPU, ~1 phút) — in thống kê + kiểm tra bất biến"),
+    ("code", '''
+from pathlib import Path
+import glob
+OUT = "/kaggle/working/data_synth"
+PREP = [str(p.parent) for p in Path("/kaggle/input").rglob("manifest_lama.jsonl") if (p.parent / "ocr_cache").is_dir()]
+assert len(PREP) == 1, f"Add Input the nb01-prep output (need exactly one), got {PREP}"
+PREP = PREP[0]
+LAMA = sorted({str(Path(p).parents[3]) for p in glob.glob("/kaggle/input/**/lama/test/masks/*.png", recursive=True)})
+PAIR = f"--pair-root {LAMA[0]}" if len(LAMA) == 1 else ""
+print("nb01:", PREP, "| LaMa output for pair check:", LAMA or "NOT FOUND (pair check skipped)")
+!{PY} scripts/select_sd15_regions.py --findit2-root auto --prep {PREP} --out {OUT}
+MAN = f"{OUT}/manifest_sd15.jsonl"
+'''),
+    ("md", '''
+## 2. Smoke test 10 mẫu (test) → QA → xem contact sheet
+Kiểm tra bằng mắt: vùng đỏ phải là **nền giấy trơn**, không có chữ giun dế / đốm đen, không thấy viền hộp. Cột |diff| chỉ sáng **trong** mask.
+'''),
+    ("code", '''
+!{PY} scripts/gen_sd15_findit2.py --findit2-root auto --manifest {MAN} --out {OUT} --split test --limit 10
+!{PY} scripts/qa_synth.py --gen sd15 --out {OUT} --manifest {MAN} --sheet-n 10 {PAIR}
+'''),
+    ("code", SHOW.format(gen="sd15")),
+    ("md", "## 3. Chạy đủ (800 mẫu, ~45–70 phút) → QA cuối (tỷ lệ gắn cờ → Limitations)"),
+    ("code", '''
+!{PY} scripts/gen_sd15_findit2.py --findit2-root auto --manifest {MAN} --out {OUT}
+!{PY} scripts/qa_synth.py --gen sd15 --out {OUT} --manifest {MAN} {PAIR}
+'''),
+    ("code", SHOW.format(gen="sd15")),
+    ("md", '''
+## 4. Hình minh họa: SD-1.5 bị ép VIẾT chữ (10 mẫu, không thuộc dataset)
+Cùng crop/hộp với AnyText replacement → cột: gốc | SD-1.5 | AnyText. Dùng cho Ch.3/Ch.4 (*Generator Training Domain*).
+'''),
+    ("code", '''
+!{PY} scripts/gen_sd15_findit2.py --findit2-root auto --out {OUT} --textdemo 10 \
+    --anytext-manifest {PREP}/manifest_anytext.jsonl --anytext-out /kaggle/input
+from IPython.display import Image, display
+display(Image(filename=f"{OUT}/sd15_textdemo/textdemo_sheet.png", width=800))
+'''),
+], gpu=True)
+
 # ------------------------------------------------------------------ 05 JPEG stress (CPU)
 NB5 = build(5, [
     ("md", """
@@ -308,6 +377,7 @@ plt.tight_layout(); plt.show()
 if __name__ == "__main__":
     for name, book in [("00_doctor.ipynb", NB0), ("01_prep_findit2.ipynb", NB1), ("02_lama_findit2.ipynb", NB2),
                        ("03_anytext_findit2.ipynb", NB3),
+                       ("04_sd15_findit2.ipynb", NB4),
                        ("05_jpeg_stress.ipynb", NB5)]:
         (HERE / name).write_text(json.dumps(book, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print("wrote", HERE / name)
